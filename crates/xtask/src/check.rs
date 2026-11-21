@@ -72,6 +72,10 @@ fn rust(root: &Path) -> Result<(), String> {
         root,
         &[
             &["cargo", "fmt", "--all", "--check"],
+            &["cargo", "check", "--locked", "--quiet", "-p", "wb-model"],
+            &["cargo", "check", "--locked", "--quiet", "-p", "wb-core"],
+            &["cargo", "check", "--locked", "--quiet", "-p", "wb"],
+            &["cargo", "check", "--locked", "--quiet", "-p", "whiteboard"],
             &[
                 "cargo",
                 "clippy",

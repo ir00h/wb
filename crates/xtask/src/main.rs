@@ -6,6 +6,7 @@ mod finding;
 mod hygiene;
 mod layers;
 mod process;
+mod purity;
 mod window;
 
 use std::path::PathBuf;

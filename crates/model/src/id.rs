@@ -1,5 +1,7 @@
-use std::fmt;
-use std::str::FromStr;
+use alloc::borrow::ToOwned;
+use alloc::string::String;
+use core::fmt;
+use core::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

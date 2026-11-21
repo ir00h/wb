@@ -6,7 +6,7 @@ use crate::process;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Finding {
     pub path: String,
-    pub line: usize,
+    pub line: Option<usize>,
     pub message: String,
 }
 
@@ -14,7 +14,15 @@ impl Finding {
     pub fn new(path: &str, line: usize, message: impl Into<String>) -> Finding {
         Finding {
             path: path.to_owned(),
-            line,
+            line: Some(line),
+            message: message.into(),
+        }
+    }
+
+    pub fn whole(path: &str, message: impl Into<String>) -> Finding {
+        Finding {
+            path: path.to_owned(),
+            line: None,
             message: message.into(),
         }
     }
@@ -22,7 +30,10 @@ impl Finding {
 
 impl fmt::Display for Finding {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(formatter, "{}:{}: {}", self.path, self.line, self.message)
+        match self.line {
+            Some(line) => write!(formatter, "{}:{line}: {}", self.path, self.message),
+            None => write!(formatter, "{}: {}", self.path, self.message),
+        }
     }
 }
 

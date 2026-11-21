@@ -5046,6 +5046,7 @@ dependencies = [
  "oxc_allocator",
  "oxc_parser",
  "oxc_span",
+ "proc-macro2",
  "ra-ap-rustc_lexer",
  "serde_json",
  "ts-rs",

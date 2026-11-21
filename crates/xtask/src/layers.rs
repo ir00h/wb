@@ -1,17 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
-use ra_ap_rustc_lexer::{FrontmatterAllowed, TokenKind, tokenize};
 use serde_json::Value;
 
-use crate::finding::{self, Finding, line_of};
+use crate::finding::{self, Finding};
 use crate::process;
+use crate::purity::{self, SourceFile};
 
 struct Layer {
     package: &'static str,
     workspace: &'static [&'static str],
     forbidden: &'static [&'static str],
     fix: &'static str,
+    pure: bool,
 }
 
 const LAYERS: &[Layer] = &[
@@ -20,41 +21,50 @@ const LAYERS: &[Layer] = &[
         workspace: &[],
         forbidden: &["tauri", "clap", "notify", "tokio"],
         fix: "keep wb-model pure: move the dependency into wb-core or a binary",
+        pure: true,
     },
     Layer {
         package: "wb-core",
         workspace: &["wb-model"],
         forbidden: &["tauri", "clap"],
         fix: "move command-line and window code into wb or whiteboard",
+        pure: false,
     },
     Layer {
         package: "wb",
         workspace: &["wb-core", "wb-model"],
         forbidden: &["tauri"],
         fix: "move window code into whiteboard",
+        pure: false,
     },
     Layer {
         package: "whiteboard",
         workspace: &["wb-core", "wb-model"],
         forbidden: &[],
         fix: "move shared code into wb-core or wb-model",
+        pure: false,
     },
     Layer {
         package: "xtask",
         workspace: &["wb-model"],
         forbidden: &[],
         fix: "xtask reads wb-model for the bindings and nothing else",
+        pure: false,
     },
 ];
-
-const PURE_PACKAGE_SOURCE: &str = "crates/model/src/";
-const IMPURE_STD_MODULES: [&str; 5] = ["fs", "process", "net", "env", "thread"];
-const IMPURE_NAMES: [&str; 1] = ["SystemTime"];
 
 #[derive(Default)]
 struct Graph {
     workspace: BTreeSet<String>,
     edges: BTreeMap<String, Vec<Edge>>,
+    packages: BTreeMap<String, Package>,
+}
+
+#[derive(Default)]
+struct Package {
+    manifest: String,
+    library_root: Option<String>,
+    build_script: Option<String>,
 }
 
 struct Edge {
@@ -67,22 +77,83 @@ pub fn check(root: &Path) -> Result<(), String> {
         root,
         &["cargo", "metadata", "--locked", "--format-version", "1"],
     )?;
-    let graph = parse_metadata(&metadata)?;
+    let graph = parse_metadata(&metadata, root)?;
     let mut findings = graph_findings(&graph);
-    for path in finding::tracked_files(root)? {
-        if path.starts_with(PURE_PACKAGE_SOURCE)
-            && Path::new(&path)
-                .extension()
-                .is_some_and(|extension| extension == "rs")
-            && let Ok(text) = std::fs::read_to_string(root.join(&path))
-        {
-            findings.extend(impure_uses(&path, &text));
+    let tracked = finding::tracked_files(root)?;
+    for layer in LAYERS.iter().filter(|layer| layer.pure) {
+        if let Some(package) = graph.packages.get(layer.package) {
+            findings.extend(purity_findings(root, package, &tracked));
         }
     }
     finding::report(&findings)
 }
 
-fn parse_metadata(json: &str) -> Result<Graph, String> {
+fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    if let Some(build_script) = &package.build_script {
+        findings.push(Finding::whole(
+            build_script,
+            "a pure package has no build script, because a build script runs with file, process and network access; move the work into wb-core or xtask",
+        ));
+    }
+    let Some(crate_root) = &package.library_root else {
+        findings.push(Finding::whole(
+            &package.manifest,
+            "a pure package must be a library",
+        ));
+        return findings;
+    };
+    let folder = package.manifest.trim_end_matches("Cargo.toml");
+    let test_folder = format!("{folder}tests/");
+    let sources: Vec<(String, String)> = tracked
+        .iter()
+        .filter(|path| {
+            path.starts_with(folder)
+                && !path.starts_with(&test_folder)
+                && Path::new(path)
+                    .extension()
+                    .is_some_and(|extension| extension == "rs")
+        })
+        .filter_map(|path| Some((path.clone(), std::fs::read_to_string(root.join(path)).ok()?)))
+        .collect();
+    let files: Vec<SourceFile> = sources
+        .iter()
+        .map(|(path, text)| SourceFile { path, text })
+        .collect();
+    findings.extend(purity::findings(crate_root, &files));
+    findings
+}
+
+fn relative(root: &Path, path: Option<&str>) -> Option<String> {
+    let path = Path::new(path?);
+    Some(
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .to_string_lossy()
+            .replace('\\', "/"),
+    )
+}
+
+fn package_facts(package: &Value, root: &Path) -> Package {
+    let targets = package["targets"].as_array().map_or(&[][..], Vec::as_slice);
+    let source_of = |kind: &str| {
+        targets
+            .iter()
+            .find(|target| {
+                target["kind"]
+                    .as_array()
+                    .is_some_and(|kinds| kinds.iter().any(|named| named.as_str() == Some(kind)))
+            })
+            .and_then(|target| relative(root, target["src_path"].as_str()))
+    };
+    Package {
+        manifest: relative(root, package["manifest_path"].as_str()).unwrap_or_default(),
+        library_root: source_of("lib"),
+        build_script: source_of("custom-build"),
+    }
+}
+
+fn parse_metadata(json: &str, root: &Path) -> Result<Graph, String> {
     let metadata: Value =
         serde_json::from_str(json).map_err(|error| format!("cargo metadata: {error}"))?;
     let names: BTreeMap<&str, &str> = metadata["packages"]
@@ -105,6 +176,11 @@ fn parse_metadata(json: &str) -> Result<Graph, String> {
             .collect(),
         ..Graph::default()
     };
+    for package in metadata["packages"].as_array().into_iter().flatten() {
+        if let Some(name) = name_of(&package["id"]).filter(|name| graph.workspace.contains(name)) {
+            graph.packages.insert(name, package_facts(package, root));
+        }
+    }
     for node in metadata["resolve"]["nodes"]
         .as_array()
         .into_iter()
@@ -197,81 +273,9 @@ fn graph_findings(graph: &Graph) -> Vec<Finding> {
     findings
 }
 
-fn impure_uses(path: &str, text: &str) -> Vec<Finding> {
-    let mut tokens: Vec<(TokenKind, usize, &str)> = Vec::new();
-    let mut offset = 0;
-    for token in tokenize(text, FrontmatterAllowed::No) {
-        let length = token.len as usize;
-        if !matches!(
-            token.kind,
-            TokenKind::Whitespace | TokenKind::LineComment { .. } | TokenKind::BlockComment { .. }
-        ) {
-            tokens.push((token.kind, offset, &text[offset..offset + length]));
-        }
-        offset += length;
-    }
-    let is_path_separator = |index: usize| {
-        matches!(tokens.get(index), Some((TokenKind::Colon, _, _)))
-            && matches!(tokens.get(index + 1), Some((TokenKind::Colon, _, _)))
-    };
-    let mut found: Vec<(usize, String)> = Vec::new();
-    for (index, &(kind, at, word)) in tokens.iter().enumerate() {
-        if kind != TokenKind::Ident {
-            continue;
-        }
-        if IMPURE_NAMES.contains(&word) {
-            found.push((at, word.to_owned()));
-        }
-        if word != "std" || !is_path_separator(index + 1) {
-            continue;
-        }
-        let mut depth = 0usize;
-        let mut segment_start = true;
-        for &(next_kind, next_at, next_word) in &tokens[index + 3..] {
-            match next_kind {
-                TokenKind::OpenBrace => {
-                    depth += 1;
-                    segment_start = true;
-                }
-                TokenKind::CloseBrace => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                TokenKind::Comma if depth == 1 => segment_start = true,
-                TokenKind::Ident if segment_start => {
-                    if IMPURE_STD_MODULES.contains(&next_word) {
-                        found.push((next_at, format!("std::{next_word}")));
-                    }
-                    segment_start = false;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ if depth == 0 => break,
-                _ => segment_start = false,
-            }
-        }
-    }
-    found.sort();
-    found
-        .into_iter()
-        .map(|(at, name)| {
-            Finding::new(
-                path,
-                line_of(text, at),
-                format!(
-                    "wb-model names {name}, but it holds only pure shapes and rules; move the file, process, clock or environment access into wb-core"
-                ),
-            )
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{Edge, Graph, graph_findings, impure_uses};
+    use super::{Edge, Graph, graph_findings};
 
     fn graph(workspace: &[&str], edges: &[(&str, &str, bool)]) -> Graph {
         let mut graph = Graph {
@@ -362,43 +366,5 @@ mod tests {
         assert!(
             messages(&extra)[0].starts_with("package wb-sync:1: is missing from the layer table")
         );
-    }
-
-    fn impure_lines(text: &str) -> Vec<(usize, String)> {
-        impure_uses("crates/model/src/lib.rs", text)
-            .into_iter()
-            .map(|finding| {
-                let name = finding
-                    .message
-                    .trim_start_matches("wb-model names ")
-                    .split(',')
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned();
-                (finding.line, name)
-            })
-            .collect()
-    }
-
-    #[test]
-    fn side_effects_in_the_model_are_reported() {
-        let text = "use std::fs;\nuse std::{collections::BTreeMap, env, io};\nfn now() { let _ = std::time::SystemTime::now(); }\nfn spawn() { ::std::thread::spawn(|| {}); }\nuse std::process::Command;\nuse std::net::TcpStream;\n";
-        assert_eq!(
-            impure_lines(text),
-            vec![
-                (1, "std::fs".to_owned()),
-                (2, "std::env".to_owned()),
-                (3, "SystemTime".to_owned()),
-                (4, "std::thread".to_owned()),
-                (5, "std::process".to_owned()),
-                (6, "std::net".to_owned()),
-            ]
-        );
-    }
-
-    #[test]
-    fn pure_code_and_strings_that_name_side_effects_pass() {
-        let text = "use std::fmt;\nuse std::collections::BTreeMap;\nconst HELP: &str = \"std::fs is not used here\";\nfn fs() {}\n";
-        assert_eq!(impure_lines(text), Vec::<(usize, String)>::new());
     }
 }

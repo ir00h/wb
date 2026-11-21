@@ -401,7 +401,7 @@ mod tests {
     fn lines(path: &str, text: &str) -> Vec<usize> {
         comments_in(path, text)
             .into_iter()
-            .map(|finding| finding.line)
+            .filter_map(|finding| finding.line)
             .collect()
     }
 
