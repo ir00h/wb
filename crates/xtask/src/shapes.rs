@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use proc_macro2::{TokenStream, TokenTree};
 use syn::punctuated::Punctuated;
 use syn::visit::{self, Visit};
-use syn::{Attribute, Expr, Ident, Lit, Meta, Path, Token, Type};
+use syn::{Attribute, Expr, Ident, Lit, Meta, MetaList, Path, Token, Type};
 
 use crate::finding::Finding;
 
@@ -22,7 +22,16 @@ struct Shape {
 struct Traits {
     exports: bool,
     serialized: bool,
-    renamed: Option<String>,
+    ts_name: Option<String>,
+    serde_name: Option<String>,
+}
+
+impl Traits {
+    fn exported_name(self, ident: &Ident) -> String {
+        self.ts_name
+            .or(self.serde_name)
+            .unwrap_or_else(|| ident.to_string())
+    }
 }
 
 pub struct SourceFile<'a> {
@@ -139,19 +148,30 @@ fn read_meta(meta: &Meta, traits: &mut Traits) {
             read_meta(inner, traits);
         }
     } else if list.path.is_ident("ts") {
-        let nested = list
-            .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
-            .unwrap_or_default();
-        for inner in &nested {
-            if let Meta::NameValue(pair) = inner
-                && pair.path.is_ident("rename")
-                && let Expr::Lit(literal) = &pair.value
-                && let Lit::Str(text) = &literal.lit
-            {
-                traits.renamed = Some(text.value());
-            }
+        if let Some(name) = renamed(list) {
+            traits.ts_name = Some(name);
         }
+    } else if list.path.is_ident("serde")
+        && let Some(name) = renamed(list)
+    {
+        traits.serde_name = Some(name);
     }
+}
+
+fn renamed(list: &MetaList) -> Option<String> {
+    let nested = list
+        .parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+        .unwrap_or_default();
+    nested.iter().rev().find_map(|inner| match inner {
+        Meta::NameValue(pair) if pair.path.is_ident("rename") => match &pair.value {
+            Expr::Lit(literal) => match &literal.lit {
+                Lit::Str(text) => Some(text.value()),
+                _ => None,
+            },
+            _ => None,
+        },
+        _ => None,
+    })
 }
 
 fn names_derive(stream: TokenStream) -> bool {
@@ -185,7 +205,7 @@ impl Collector<'_> {
         shape.line = ident.span().start().line;
         shape.serialized |= traits.serialized;
         if traits.exports {
-            shape.exported_as = Some(traits.renamed.unwrap_or_else(|| ident.to_string()));
+            shape.exported_as = Some(traits.exported_name(ident));
         }
     }
 }
@@ -275,6 +295,23 @@ mod tests {
     fn an_exported_shape_with_a_binding_passes() {
         let text = "#[derive(Serialize)]\n#[cfg_attr(feature = \"ts\", derive(ts_rs::TS), ts(rename = \"Card\"))]\npub struct CardShape { x: u32 }\n";
         assert_eq!(messages(text, &["Card"], &[]), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_exported_shape_is_looked_up_by_its_serde_name_unless_ts_renames_it() {
+        let serde_only = "#[derive(Debug, Clone, serde::Serialize)]\n#[cfg_attr(feature = \"ts\", derive(ts_rs::TS))]\n#[serde(rename = \"Placement\")]\npub struct CardPlacement { pub x: u32 }\n";
+        assert_eq!(
+            messages(serde_only, &["Placement"], &[]),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            messages(serde_only, &["CardPlacement"], &[]),
+            vec![
+                "crates/model/src/card.rs:4: `CardPlacement` derives the TypeScript export but no binding is generated for it; add `CardPlacement::export_all` to export_every_type in crates/xtask/src/bindings.rs"
+            ]
+        );
+        let both = "#[cfg_attr(feature = \"ts\", derive(ts_rs::TS), ts(rename = \"Spot\"))]\n#[derive(serde::Serialize)]\n#[serde(rename = \"Placement\", deny_unknown_fields)]\npub struct CardPlacement { pub x: u32 }\n";
+        assert_eq!(messages(both, &["Spot"], &[]), Vec::<String>::new());
     }
 
     #[test]
