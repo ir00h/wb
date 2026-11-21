@@ -71,3 +71,36 @@ fn a_config_that_stays_blank_is_an_empty_config() {
     let now = fs::read_to_string(&config).expect("config");
     assert!(now.starts_with("{\n  \"version\": 1,\n  \"sections\": [") && now.contains("Beds"));
 }
+
+#[cfg(unix)]
+#[test]
+fn an_edit_keeps_the_permission_bits_of_a_note_and_of_the_config() {
+    use std::os::unix::fs::PermissionsExt;
+
+    const OWNER_ONLY: u32 = 0o600;
+    let mode =
+        |path: &std::path::Path| fs::metadata(path).expect("file").permissions().mode() & 0o777;
+    let scratch = Scratch::new("permissions");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    let note = add_note(&board, "Diary", "Private.");
+    let file = folder.join(common::files_holding(&folder, &note.id).remove(0));
+    let config = folder.join(CONFIG_FILE);
+    board.apply(add_section("Beds")).expect("section");
+    for path in [&file, &config] {
+        fs::set_permissions(path, fs::Permissions::from_mode(OWNER_ONLY)).expect("permissions");
+    }
+
+    board
+        .apply(common::append(&note.id, "More."))
+        .expect("edit");
+    board.apply(add_section("Paths")).expect("section");
+
+    assert_eq!(
+        (mode(&file), mode(&config)),
+        (OWNER_ONLY, OWNER_ONLY),
+        "the note is now {:o} and the config {:o}, both were {OWNER_ONLY:o}",
+        mode(&file),
+        mode(&config)
+    );
+}

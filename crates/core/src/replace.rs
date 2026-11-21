@@ -1,4 +1,4 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -94,7 +94,7 @@ pub fn rename_note(held: &Held, id: &NoteId, from: &str, to: &str) -> io::Result
 }
 
 fn create_through(temporary: &Path, path: &Path, new: &[u8]) -> io::Result<Created> {
-    let created = write_temporary(temporary, new)
+    let created = write_temporary(temporary, new, None)
         .and_then(|()| platform::rename_unless_taken(temporary, path));
     match created {
         Ok(()) => {
@@ -118,10 +118,12 @@ fn exchange_unless_changed(
     read: &[u8],
     new: &[u8],
 ) -> io::Result<Replaced> {
-    if !path.try_exists()? {
-        return Ok(Replaced::Gone);
-    }
-    write_temporary(temporary, new)?;
+    let permissions = match fs::metadata(path) {
+        Ok(replaced) => replaced.permissions(),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
+        Err(error) => return Err(error),
+    };
+    write_temporary(temporary, new, Some(permissions))?;
     #[cfg(test)]
     hook::run(path);
     match platform::exchange(temporary, path) {
@@ -163,13 +165,20 @@ fn rename_after_a_last_look(temporary: &Path, path: &Path, read: &[u8]) -> io::R
     }
 }
 
-fn write_temporary(temporary: &Path, bytes: &[u8]) -> io::Result<()> {
+fn write_temporary(
+    temporary: &Path,
+    bytes: &[u8],
+    permissions: Option<Permissions>,
+) -> io::Result<()> {
     let _ = fs::remove_file(temporary);
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(temporary)?;
     file.write_all(bytes)?;
+    if let Some(permissions) = permissions {
+        file.set_permissions(permissions)?;
+    }
     file.sync_all()
 }
 
