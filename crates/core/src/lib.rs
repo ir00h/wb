@@ -1,10 +1,12 @@
+mod board;
+pub mod config;
+mod failure;
+mod folder;
+mod ids;
 pub mod lock;
+mod workspace;
 
-use std::path::Path;
-
-pub const BOARD_FILE: &str = "board.json";
-
-#[must_use]
-pub fn is_board_folder(folder: &Path) -> bool {
-    folder.join(BOARD_FILE).is_file()
-}
+pub use board::Board;
+pub use folder::TRASH_FOLDER;
+pub use wb_model::BOARD_FILE;
+pub use workspace::{DEFAULT_LOCK_DEADLINE, Workspace, is_board_folder};
