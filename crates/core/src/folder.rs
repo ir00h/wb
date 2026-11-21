@@ -52,7 +52,11 @@ fn note_file_names(folder: &Path) -> Result<Vec<String>, Error> {
         let Ok(name) = entry.file_name().into_string() else {
             continue;
         };
-        if name.ends_with(NOTE_EXTENSION) && !name.starts_with('.') && entry.path().is_file() {
+        if !name.ends_with(NOTE_EXTENSION) || name.starts_with('.') {
+            continue;
+        }
+        let kind = entry.file_type().map_err(io_failure(folder))?;
+        if kind.is_file() || (kind.is_symlink() && entry.path().is_file()) {
             names.push(name);
         }
     }
@@ -126,11 +130,15 @@ fn holding(folder: &Path, id: &NoteId, names: Vec<String>) -> Result<Vec<NoteFil
 }
 
 pub fn find(folder: &Path, id: &NoteId) -> Result<Option<NoteFile>, Error> {
-    let everywhere = holding(folder, id, note_file_names(folder)?)?;
-    let (named, other): (Vec<NoteFile>, Vec<NoteFile>) = everywhere
+    let (named, other): (Vec<String>, Vec<String>) = note_file_names(folder)?
         .into_iter()
-        .partition(NoteFile::is_named_for_its_id);
-    the_one_file(id, if named.is_empty() { other } else { named })
+        .partition(|name| is_named_for(name, id));
+    let named = holding(folder, id, named)?;
+    if named.is_empty() {
+        the_one_file(id, holding(folder, id, other)?)
+    } else {
+        the_one_file(id, named)
+    }
 }
 
 pub fn trashed_ids(board: &Path) -> Result<Vec<NoteId>, Error> {

@@ -200,3 +200,49 @@ fn an_edit_is_refused_when_two_files_named_for_nothing_hold_one_id() {
         })
     );
 }
+
+#[test]
+fn a_note_in_a_file_named_for_another_id_is_found_by_the_id_inside_it() {
+    let scratch = Scratch::new("name-and-id-differ");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    let decoy = add_note(
+        &board,
+        "Lettuce",
+        "A note whose file name ends in its own id.",
+    );
+    fs::write(
+        folder.join("lettuce-n0ther1.md"),
+        "---\nid: nreal01\n---\n\n# Lettuce\n\nSow in rows.\n",
+    )
+    .expect("note in a file named for another id");
+    fs::write(folder.join("kale.md"), "---\nid: nreal02\n---\n\n# Kale\n").expect("plain name");
+    let (lettuce, kale) = (
+        wb_model::NoteId::parse("nreal01").expect("note id"),
+        wb_model::NoteId::parse("nreal02").expect("note id"),
+    );
+
+    assert_eq!(board.note(&lettuce).expect("note").body, "Sow in rows.");
+    board
+        .apply(common::append(&lettuce, "Thin in May."))
+        .expect("edit of a note in a file named for another id");
+    assert_eq!(
+        common::files_holding(&folder, &lettuce),
+        ["lettuce-nreal01.md"]
+    );
+    board
+        .apply(common::set_title(&kale, None, "Curly kale"))
+        .expect("edit of a note in a file with a plain name");
+    assert_eq!(
+        common::files_holding(&folder, &kale),
+        ["curly-kale-nreal02.md"]
+    );
+    assert_eq!(
+        board.note(&decoy.id).expect("note").body,
+        "A note whose file name ends in its own id."
+    );
+    assert!(matches!(
+        board.note(&wb_model::NoteId::parse("n0ther1").expect("note id")),
+        Err(wb_model::Error::NoteNotFound { .. })
+    ));
+}
