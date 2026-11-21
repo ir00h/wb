@@ -107,6 +107,16 @@
           "node_modules/vitest/"
         ]
       }
+    },
+    {
+      "name": "main-imports-only-react-react-dom-and-ui",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/main\\.tsx$"
+      },
+      "to": {
+        "pathNot": ["^window/src/ui/", "node_modules/(@types/)?react(-dom)?/"]
+      }
     }
   ],
   "options": {

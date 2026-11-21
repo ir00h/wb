@@ -9,6 +9,7 @@ mod process;
 mod purity;
 mod shapes;
 mod window;
+mod window_rules;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

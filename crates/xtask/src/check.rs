@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::{bindings, comments, commits, hygiene, layers, process, window};
+use crate::{bindings, comments, commits, hygiene, layers, process, window, window_rules};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
@@ -45,7 +45,11 @@ impl Step {
     fn run(self, root: &Path) -> Result<(), String> {
         match self {
             Step::Comments => comments::check(root),
-            Step::Layers => both(layers::check(root), window::layers(root)),
+            Step::Layers => all([
+                layers::check(root),
+                window::layers(root),
+                window_rules::check(root),
+            ]),
             Step::Bindings => bindings::check(root),
             Step::Commits => commits::check(root),
             Step::Hygiene => hygiene::check(root),
@@ -55,11 +59,8 @@ impl Step {
     }
 }
 
-fn both(rust: Result<(), String>, typescript: Result<(), String>) -> Result<(), String> {
-    let reports: Vec<String> = [rust, typescript]
-        .into_iter()
-        .filter_map(Result::err)
-        .collect();
+fn all<const N: usize>(outcomes: [Result<(), String>; N]) -> Result<(), String> {
+    let reports: Vec<String> = outcomes.into_iter().filter_map(Result::err).collect();
     if reports.is_empty() {
         Ok(())
     } else {
