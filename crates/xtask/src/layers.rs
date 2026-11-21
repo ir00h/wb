@@ -106,6 +106,7 @@ struct Package {
     manifest: String,
     library_root: Option<String>,
     build_script: Option<String>,
+    binaries: Vec<String>,
     dependencies: Vec<(String, Kind)>,
 }
 
@@ -176,7 +177,7 @@ fn declares_workspace(manifest: &str) -> bool {
         .is_ok_and(|table| table.contains_key("workspace"))
 }
 
-fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Finding> {
+fn target_findings(package: &Package) -> Vec<Finding> {
     let mut findings = Vec::new();
     if let Some(build_script) = &package.build_script {
         findings.push(Finding::whole(
@@ -184,11 +185,24 @@ fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Fi
             "a pure package has no build script, because a build script runs with file, process and network access; move the work into wb-core or xtask",
         ));
     }
-    let Some(crate_root) = &package.library_root else {
+    if package.library_root.is_none() {
         findings.push(Finding::whole(
             &package.manifest,
             "a pure package must be a library",
         ));
+    }
+    findings.extend(package.binaries.iter().map(|binary| {
+        Finding::whole(
+            binary,
+            "a pure package has no binary, because a binary builds with the standard library and its file, process and network access; move the program into wb or xtask",
+        )
+    }));
+    findings
+}
+
+fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Finding> {
+    let mut findings = target_findings(package);
+    let Some(crate_root) = &package.library_root else {
         return findings;
     };
     let folder = package.manifest.trim_end_matches(ROOT_MANIFEST);
@@ -232,15 +246,16 @@ fn kind_of(dependency: &Value) -> Kind {
 
 fn package_facts(package: &Value, root: &Path) -> Package {
     let targets = package["targets"].as_array().map_or(&[][..], Vec::as_slice);
-    let source_of = |kind: &str| {
+    let paths_of = |kind: &str| {
         targets
             .iter()
-            .find(|target| {
+            .filter(|target| {
                 target["kind"]
                     .as_array()
                     .is_some_and(|kinds| kinds.iter().any(|named| named.as_str() == Some(kind)))
             })
-            .and_then(|target| relative(root, target["src_path"].as_str()))
+            .filter_map(|target| relative(root, target["src_path"].as_str()))
+            .collect::<Vec<String>>()
     };
     let mut dependencies: Vec<(String, Kind)> = package["dependencies"]
         .as_array()
@@ -253,8 +268,9 @@ fn package_facts(package: &Value, root: &Path) -> Package {
     dependencies.sort_by(|a, b| a.0.cmp(&b.0));
     Package {
         manifest: relative(root, package["manifest_path"].as_str()).unwrap_or_default(),
-        library_root: source_of("lib"),
-        build_script: source_of("custom-build"),
+        library_root: paths_of("lib").into_iter().next(),
+        build_script: paths_of("custom-build").into_iter().next(),
+        binaries: paths_of("bin"),
         dependencies,
     }
 }
@@ -290,7 +306,11 @@ fn parse_metadata(json: &str, root: &Path) -> Result<BTreeMap<String, Package>, 
 mod tests {
     use std::collections::BTreeMap;
 
-    use super::{Kind, Package, declares_workspace, table_findings};
+    use std::path::Path;
+
+    use super::{
+        Kind, Package, declares_workspace, parse_metadata, table_findings, target_findings,
+    };
 
     fn packages(entries: &[(&str, &[(&str, Kind)])]) -> BTreeMap<String, Package> {
         entries
@@ -371,6 +391,47 @@ mod tests {
                 "crates/wb-sync/Cargo.toml: package wb-sync is missing from the layer table; add it to LAYERS in crates/xtask/src/layers.rs with the dependencies it may use"
             ]
         );
+    }
+
+    #[test]
+    fn a_pure_package_with_a_binary_target_is_reported() {
+        let metadata = r#"{
+            "workspace_members": ["model"],
+            "packages": [{
+                "id": "model",
+                "name": "wb-model",
+                "manifest_path": "/repo/crates/model/Cargo.toml",
+                "dependencies": [],
+                "targets": [
+                    { "kind": ["lib"], "src_path": "/repo/crates/model/src/lib.rs" },
+                    { "kind": ["bin"], "src_path": "/repo/crates/model/src/bin/dump.rs" },
+                    { "kind": ["bin"], "src_path": "/repo/crates/model/tools/main.rs" },
+                    { "kind": ["test"], "src_path": "/repo/crates/model/tests/notes.rs" }
+                ]
+            }]
+        }"#;
+        let packages = parse_metadata(metadata, Path::new("/repo")).expect("the metadata is valid");
+        let found: Vec<String> = target_findings(&packages["wb-model"])
+            .into_iter()
+            .map(|finding| finding.to_string())
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                "crates/model/src/bin/dump.rs: a pure package has no binary, because a binary builds with the standard library and its file, process and network access; move the program into wb or xtask",
+                "crates/model/tools/main.rs: a pure package has no binary, because a binary builds with the standard library and its file, process and network access; move the program into wb or xtask",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_pure_library_without_other_targets_passes() {
+        let package = Package {
+            manifest: "crates/model/Cargo.toml".to_owned(),
+            library_root: Some("crates/model/src/lib.rs".to_owned()),
+            ..Package::default()
+        };
+        assert!(target_findings(&package).is_empty());
     }
 
     #[test]
