@@ -2,18 +2,20 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::process;
+use crate::{comments, process};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
+    Comments,
     Rust,
 }
 
 impl Step {
-    pub const ALL: &'static [Step] = &[Step::Rust];
+    pub const ALL: &'static [Step] = &[Step::Comments, Step::Rust];
 
     pub fn name(self) -> &'static str {
         match self {
+            Step::Comments => "comments",
             Step::Rust => "rust",
         }
     }
@@ -24,6 +26,7 @@ impl Step {
 
     fn run(self, root: &Path) -> Result<(), String> {
         match self {
+            Step::Comments => comments::check(root),
             Step::Rust => rust(root),
         }
     }

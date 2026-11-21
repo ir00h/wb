@@ -1,4 +1,6 @@
 mod check;
+mod comments;
+mod finding;
 mod process;
 
 use std::path::PathBuf;
