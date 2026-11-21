@@ -14,6 +14,7 @@ export type WindowFacts = {
   readonly width: number;
   readonly height: number;
   readonly scale: number;
+  readonly visible: boolean;
   readonly windowNumber: number | null;
   readonly background: boolean;
 };
