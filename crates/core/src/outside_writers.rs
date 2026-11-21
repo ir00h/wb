@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
@@ -13,6 +14,8 @@ use crate::replace::{
 };
 use crate::{Board, TRASH_FOLDER, Workspace};
 
+const KILLED_WRITER: &str = "WB_TEST_KILLED_WRITER";
+const KILLED_WRITER_NOTE: &str = "WB_TEST_KILLED_WRITER_NOTE";
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
 const AT_ONCE: Duration = Duration::from_millis(50);
 
@@ -280,4 +283,101 @@ fn a_new_file_never_replaces_one_that_is_there() {
     );
     assert_eq!(fs::read(&file).expect("note file"), b"second, longer");
     assert_eq!(garden.left_in_the_locks_folder(), Vec::<String>::new());
+}
+
+fn die_as_the_writer_that_is_killed_before_its_exchange(root: &str) {
+    let workspace = Workspace::open(Path::new(root)).expect("workspace");
+    let board = workspace
+        .board(&"garden".parse().expect("board id"))
+        .expect("board handle");
+    let note = NoteId::parse(&std::env::var(KILLED_WRITER_NOTE).expect("note")).expect("note id");
+    before_the_next_exchange(|_| std::process::abort());
+    let _ = board.apply(append(&note, "Written by the writer that was killed."));
+}
+
+#[test]
+fn the_temporary_file_of_a_killed_writer_is_no_note_and_goes_with_the_next_write() {
+    if let Ok(root) = std::env::var(KILLED_WRITER) {
+        die_as_the_writer_that_is_killed_before_its_exchange(&root);
+        return;
+    }
+    let garden = Garden::new("killed-writer");
+    let note = garden.add_note("Harvest log", "Monday: peas.");
+    let killed = Command::new(std::env::current_exe().expect("test binary"))
+        .args([
+            "outside_writers::the_temporary_file_of_a_killed_writer_is_no_note_and_goes_with_the_next_write",
+            "--exact",
+            "--nocapture",
+        ])
+        .env(KILLED_WRITER, &garden.root)
+        .env(KILLED_WRITER_NOTE, note.id.as_str())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("writer process");
+    assert!(!killed.success(), "the writer was not killed");
+
+    let left = garden.left_in_the_locks_folder();
+    assert_eq!(left.len(), 1, "the killed writer left {left:?}");
+    assert!(
+        fs::read_to_string(&left[0])
+            .expect("temporary file")
+            .contains("Written by the writer that was killed.")
+    );
+    let snapshot = garden.board.snapshot().expect("snapshot");
+    assert_eq!(
+        (snapshot.notes.len(), snapshot.strays),
+        (1, Vec::<String>::new())
+    );
+    assert_eq!(snapshot.notes[0].body, "Monday: peas.");
+
+    garden
+        .board
+        .apply(append(&note.id, "Tuesday: kale."))
+        .expect("the next write");
+    let left = garden.left_in_the_locks_folder();
+    assert_eq!(
+        left,
+        Vec::<String>::new(),
+        "the next writer of the note left the killed writer's temporary file behind"
+    );
+    assert_eq!(
+        garden.board.note(&note.id).expect("note").body,
+        "Monday: peas.\n\nTuesday: kale."
+    );
+}
+
+#[test]
+fn taking_a_lock_removes_what_a_killed_holder_of_that_lock_left() {
+    let garden = Garden::new("leftovers");
+    let note = garden.add_note("Plant list", "Tomatoes");
+    let locks = garden.folder().join(LOCKS_FOLDER);
+    let of_this_note = locks.join(format!("{}.tmp", note.id));
+    let of_another_note = locks.join("n0ther1.tmp");
+    let of_the_config = locks.join("board.config.tmp");
+    for left in [&of_this_note, &of_another_note, &of_the_config] {
+        fs::write(left, "half a file").expect("left file");
+    }
+
+    drop(
+        BoardLocks::of_board(&garden.folder())
+            .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
+            .expect("note lock"),
+    );
+    assert_eq!(
+        garden.left_in_the_locks_folder(),
+        [
+            of_the_config.display().to_string(),
+            of_another_note.display().to_string()
+        ]
+    );
+    drop(
+        BoardLocks::of_board(&garden.folder())
+            .acquire(&[LockKey::Config], AT_ONCE)
+            .expect("config lock"),
+    );
+    assert_eq!(
+        garden.left_in_the_locks_folder(),
+        [of_another_note.display().to_string()]
+    );
 }

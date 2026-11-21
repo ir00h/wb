@@ -115,6 +115,7 @@ impl BoardLocks {
                     Err(TryLockError::Error(error)) => return Err(LockError::Io(error)),
                 }
             }
+            let _ = fs::remove_file(folder.join(key.file_name(TEMPORARY_EXTENSION)));
             held.keys.push(key);
             held.files.push(sidecar);
         }
