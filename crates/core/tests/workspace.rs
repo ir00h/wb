@@ -45,7 +45,7 @@ fn a_new_board_gets_a_folder_named_after_it_and_a_board_file() {
     assert_eq!(garden.name, "Kitchen garden");
     assert_eq!(
         fs::read_to_string(scratch.path().join("kitchen-garden/board.json")).expect("board file"),
-        "{\n  \"version\": 2,\n  \"name\": \"Kitchen garden\"\n}\n"
+        "{\n  \"version\": 2,\n  \"name\": \"Kitchen garden\",\n  \"cards\": {},\n  \"sections\": {}\n}\n"
     );
     assert!(wb_core::is_board_folder(
         &scratch.path().join("kitchen-garden")

@@ -20,10 +20,14 @@ pub struct BoardFile {
 impl BoardFile {
     #[must_use]
     pub fn new(name: &str) -> BoardFile {
+        let mut extra = Map::new();
+        for key in [CARDS_KEY, SECTIONS_KEY] {
+            extra.insert(key.to_owned(), Value::Object(Map::new()));
+        }
         BoardFile {
             version: BOARD_FORMAT_VERSION,
             name: name.to_owned(),
-            extra: Map::new(),
+            extra,
         }
     }
 

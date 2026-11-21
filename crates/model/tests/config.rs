@@ -113,9 +113,9 @@ fn a_board_file_keeps_every_key_it_does_not_name() {
 }
 
 #[test]
-fn a_new_board_file_holds_the_format_version_and_the_name() {
+fn a_new_board_file_holds_the_format_version_the_name_and_no_cards_or_sections() {
     assert_eq!(
         BoardFile::new("Garden").render().expect("text"),
-        "{\n  \"version\": 2,\n  \"name\": \"Garden\"\n}\n"
+        "{\n  \"version\": 2,\n  \"name\": \"Garden\",\n  \"cards\": {},\n  \"sections\": {}\n}\n"
     );
 }
