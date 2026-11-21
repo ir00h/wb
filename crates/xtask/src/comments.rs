@@ -14,12 +14,14 @@ enum Syntax {
     Rust,
     Script,
     Css,
-    Markup,
+    Html,
+    Markdown,
     Toml,
     Yaml,
     Shell,
     IgnoreList,
     Json,
+    VersionLine,
     Plain,
     Binary,
 }
@@ -58,7 +60,8 @@ fn syntax_of(path: &str) -> Option<Syntax> {
     let by_name = match name {
         "Cargo.lock" => Some(Syntax::Toml),
         ".gitignore" | ".gitattributes" => Some(Syntax::IgnoreList),
-        ".node-version" | "LICENSE" => Some(Syntax::Plain),
+        ".node-version" => Some(Syntax::VersionLine),
+        "LICENSE" => Some(Syntax::Plain),
         _ => None,
     };
     if by_name.is_some() {
@@ -69,12 +72,12 @@ fn syntax_of(path: &str) -> Option<Syntax> {
         "rs" => Syntax::Rust,
         "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs" => Syntax::Script,
         "css" => Syntax::Css,
-        "html" | "md" => Syntax::Markup,
+        "html" => Syntax::Html,
+        "md" => Syntax::Markdown,
         "toml" => Syntax::Toml,
         "yml" | "yaml" => Syntax::Yaml,
         "sh" => Syntax::Shell,
         "json" => Syntax::Json,
-        "txt" => Syntax::Plain,
         "png" | "icns" | "ico" => Syntax::Binary,
         _ => return None,
     })
@@ -88,7 +91,7 @@ fn is_allowed(path: &str, line: usize, line_text: &str) -> bool {
         };
         let directive_matches = match allowance.directive {
             Directive::Line(exact) => line_text == exact,
-            Directive::Shebang => line == 1 && line_text.starts_with("#!"),
+            Directive::Shebang => line == 1 && line_text.starts_with("#!/"),
         };
         file_matches && directive_matches
     })
@@ -126,7 +129,7 @@ fn allow_list() -> String {
         .map(|allowance| {
             let directive = match allowance.directive {
                 Directive::Line(exact) => exact,
-                Directive::Shebang => "#! on the first line",
+                Directive::Shebang => "#!/ on the first line",
             };
             format!(
                 "  {}: `{directive}` because {}",
@@ -145,7 +148,12 @@ fn comments_in(path: &str, text: &str) -> Vec<Finding> {
             Err(message) => return vec![Finding::new(path, 1, message)],
         },
         Some(Syntax::Css) => css_comments(text),
-        Some(Syntax::Markup) => text.match_indices("<!--").map(|(at, _)| at).collect(),
+        Some(Syntax::Html) => match html_comments(text) {
+            Ok(offsets) => offsets,
+            Err(message) => return vec![Finding::new(path, 1, message)],
+        },
+        Some(Syntax::Markdown) => markdown_comments(text),
+        Some(Syntax::VersionLine) => return version_line_findings(path, text),
         Some(Syntax::Toml) => toml_comments(text),
         Some(Syntax::Yaml) => yaml_comments(text),
         Some(Syntax::Shell) => shell_comments(text),
@@ -196,29 +204,59 @@ fn rust_comments(text: &str) -> Vec<usize> {
     offsets
 }
 
+struct Attribute {
+    start: usize,
+    depth: usize,
+    first_word: Option<String>,
+}
+
 fn doc_attributes(tokens: &[(TokenKind, usize, &str)]) -> Vec<usize> {
     let mut offsets = Vec::new();
-    let mut attribute: Option<(usize, usize)> = None;
+    let mut attribute: Option<Attribute> = None;
     for (index, &(kind, offset, token_text)) in tokens.iter().enumerate() {
-        match (attribute, kind) {
-            (None, TokenKind::Pound) => {
+        let previous = index.checked_sub(1).and_then(|before| tokens.get(before));
+        let Some(open) = attribute.as_mut() else {
+            if kind == TokenKind::Pound {
                 let mut next = index + 1;
                 if matches!(tokens.get(next), Some((TokenKind::Bang, _, _))) {
                     next += 1;
                 }
                 if matches!(tokens.get(next), Some((TokenKind::OpenBracket, _, _))) {
-                    attribute = Some((offset, 0));
+                    attribute = Some(Attribute {
+                        start: offset,
+                        depth: 0,
+                        first_word: None,
+                    });
                 }
             }
-            (Some((start, depth)), TokenKind::OpenBracket) => attribute = Some((start, depth + 1)),
-            (Some((start, depth)), TokenKind::CloseBracket) => {
-                attribute = (depth > 1).then_some((start, depth - 1));
+            continue;
+        };
+        match kind {
+            TokenKind::OpenBracket => open.depth += 1,
+            TokenKind::CloseBracket => {
+                open.depth -= 1;
+                if open.depth == 0 {
+                    attribute = None;
+                }
             }
-            (Some((start, _)), TokenKind::Ident)
+            TokenKind::Ident => {
+                if open.first_word.is_none() {
+                    open.first_word = Some(token_text.to_owned());
+                }
                 if token_text == "doc"
-                    && matches!(tokens.get(index + 1), Some((TokenKind::Eq, _, _))) =>
-            {
-                offsets.push(start);
+                    && matches!(tokens.get(index + 1), Some((TokenKind::Eq, _, _)))
+                {
+                    offsets.push(open.start);
+                }
+            }
+            TokenKind::Dollar => {
+                let names_the_attribute = matches!(previous, Some((TokenKind::OpenBracket, _, _)))
+                    && open.depth == 1
+                    || matches!(previous, Some((TokenKind::Comma, _, _)))
+                        && open.first_word.as_deref() == Some("cfg_attr");
+                if names_the_attribute {
+                    offsets.push(open.start);
+                }
             }
             _ => {}
         }
@@ -229,6 +267,10 @@ fn doc_attributes(tokens: &[(TokenKind, usize, &str)]) -> Vec<usize> {
 fn script_comments(path: &str, text: &str) -> Result<Vec<usize>, String> {
     let source_type = SourceType::from_path(path)
         .map_err(|error| format!("cannot tell the script dialect: {error}"))?;
+    parsed_script_comments(source_type, text)
+}
+
+fn parsed_script_comments(source_type: SourceType, text: &str) -> Result<Vec<usize>, String> {
     let allocator = Allocator::default();
     let parsed = Parser::new(&allocator, text, source_type).parse();
     if let Some(error) = parsed.errors.first() {
@@ -242,6 +284,80 @@ fn script_comments(path: &str, text: &str) -> Result<Vec<usize>, String> {
         .iter()
         .map(|comment| comment.span.start as usize)
         .collect())
+}
+
+fn element_contents<'a>(text: &'a str, tag: &str) -> Vec<(usize, &'a str)> {
+    let lower = text.to_ascii_lowercase();
+    let open = format!("<{tag}");
+    let close = format!("</{tag}");
+    let mut contents = Vec::new();
+    let mut from = 0;
+    while let Some(found) = lower[from..].find(&open) {
+        let tag_start = from + found;
+        let Some(tag_end) = lower[tag_start..].find('>').map(|end| tag_start + end + 1) else {
+            break;
+        };
+        let content_end = lower[tag_end..]
+            .find(&close)
+            .map_or(text.len(), |end| tag_end + end);
+        contents.push((tag_end, &text[tag_end..content_end]));
+        from = content_end;
+    }
+    contents
+}
+
+fn html_comments(text: &str) -> Result<Vec<usize>, String> {
+    let mut offsets: Vec<usize> = text.match_indices("<!--").map(|(at, _)| at).collect();
+    for (start, script) in element_contents(text, "script") {
+        let found = parsed_script_comments(SourceType::mjs(), script)
+            .map_err(|message| format!("an inline script {message}"))?;
+        offsets.extend(found.into_iter().map(|at| start + at));
+    }
+    for (start, style) in element_contents(text, "style") {
+        offsets.extend(css_comments(style).into_iter().map(|at| start + at));
+    }
+    offsets.sort_unstable();
+    Ok(offsets)
+}
+
+fn is_link_reference_comment(line: &str) -> bool {
+    let Some(rest) = line.trim_start().strip_prefix('[') else {
+        return false;
+    };
+    rest.split_once("]:").is_some_and(|(_, destination)| {
+        let destination = destination.trim_start();
+        destination.starts_with('#') || destination.starts_with("<>")
+    })
+}
+
+fn markdown_comments(text: &str) -> Vec<usize> {
+    let mut offsets: Vec<usize> = text.match_indices("<!--").map(|(at, _)| at).collect();
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        if is_link_reference_comment(line) {
+            offsets.push(offset);
+        }
+        offset += line.len();
+    }
+    offsets.sort_unstable();
+    offsets
+}
+
+fn version_line_findings(path: &str, text: &str) -> Vec<Finding> {
+    let version = text.strip_suffix('\n').unwrap_or(text);
+    let is_version = !version.is_empty()
+        && version
+            .split('.')
+            .all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()));
+    if is_version {
+        Vec::new()
+    } else {
+        vec![Finding::new(
+            path,
+            1,
+            "holds one version line and nothing else, such as `24.18.0`; the tool that reads it takes no notes",
+        )]
+    }
 }
 
 fn json_findings(path: &str, text: &str) -> Vec<Finding> {
@@ -538,6 +654,43 @@ mod tests {
     fn markup_comments_are_reported() {
         assert_eq!(lines("a.html", "<p>x</p>\n<!-- why -->\n"), vec![2]);
         assert_eq!(lines("a.md", "# Title\n\n<!-- hidden -->\n"), vec![3]);
+    }
+
+    #[test]
+    fn inline_script_and_style_are_checked_with_their_own_rules() {
+        let text = "<script type=\"module\" src=\"/src/main.tsx\"></script>\n<SCRIPT>\n  const url = \"https://example.org\";\n  // line\n  /* block */\n</SCRIPT>\n<style>\n  a { content: \"/* text */\"; }\n  /* css */\n</style>\n";
+        assert_eq!(lines("a.html", text), vec![4, 5, 9]);
+    }
+
+    #[test]
+    fn markdown_link_reference_comments_are_reported() {
+        let text =
+            "# Title\n\n[//]: # (hidden)\n[comment]: <> (hidden)\n[docs]: https://example.org\n";
+        assert_eq!(lines("a.md", text), vec![3, 4]);
+    }
+
+    #[test]
+    fn a_shebang_is_allowed_only_as_a_path_on_the_first_line() {
+        assert_eq!(lines("run.sh", "#! just a note\necho hi\n"), vec![1]);
+        assert_eq!(lines("run.sh", "echo hi\n#!/bin/sh\n"), vec![2]);
+        assert_eq!(lines("run.sh", "#!/bin/sh\necho hi\n"), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn node_version_holds_one_version_line() {
+        assert_eq!(lines(".node-version", "24.18.0\n"), Vec::<usize>::new());
+        assert_eq!(
+            lines(".node-version", "24.18.0\n# pinned for ci\n"),
+            vec![1]
+        );
+        assert_eq!(lines("notes.txt", "anything\n"), Vec::<usize>::new());
+        assert!(super::syntax_of("notes.txt").is_none());
+    }
+
+    #[test]
+    fn a_doc_attribute_built_from_a_macro_fragment_is_reported() {
+        let text = "macro_rules! described {\n    ($($a:tt)*) => { #[$($a)*] pub struct Seeded; };\n}\nmacro_rules! gated {\n    ($m:meta) => { #[cfg_attr(test, $m)] pub struct Gated; };\n}\nmacro_rules! typed {\n    ($brand:literal) => { #[ts(type = $brand)] pub struct Typed; };\n}\n";
+        assert_eq!(lines("a.rs", text), vec![2, 5]);
     }
 
     #[test]
