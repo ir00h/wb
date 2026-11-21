@@ -4,6 +4,7 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::config::{HUE_MAX, HUE_MIN};
 use crate::id::{BoardId, NoteId};
 use crate::sections::SectionRef;
 
@@ -54,6 +55,8 @@ pub enum Invalid {
     EmptySectionName,
     #[error("a section called `{name}` already exists there; pick another name")]
     SectionNameTaken { name: String },
+    #[error("a hue is a number from {HUE_MIN} to {HUE_MAX}")]
+    HueOutOfRange,
     #[error("a board needs a name")]
     EmptyBoardName,
 }

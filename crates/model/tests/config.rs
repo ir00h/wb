@@ -81,7 +81,9 @@ fn a_missing_or_blank_config_is_an_empty_one() {
 fn adding_a_section_keeps_every_key_the_config_already_had() {
     let mut config = BoardConfig::parse(WRITTEN).expect("config");
     let id = SectionId::parse("s3").expect("id");
-    config.add_section(&id, "Compost", None).expect("added");
+    config
+        .add_section(&id, "Compost", None, "", None)
+        .expect("added");
     let mut expected: Value = serde_json::from_str(WRITTEN).expect("json");
     expected["sections"]
         .as_array_mut()
@@ -94,7 +96,9 @@ fn adding_a_section_keeps_every_key_the_config_already_had() {
 fn a_later_config_version_is_not_lowered() {
     let mut config = BoardConfig::parse(r#"{ "version": 7 }"#).expect("config");
     let id = SectionId::parse("s1").expect("id");
-    config.add_section(&id, "Beds", None).expect("added");
+    config
+        .add_section(&id, "Beds", None, "", None)
+        .expect("added");
     assert_eq!(config.version, 7);
 }
 

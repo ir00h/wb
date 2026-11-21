@@ -71,7 +71,12 @@ impl Board {
 
     pub fn apply(&self, op: Op) -> Result<Outcome, Error> {
         match op {
-            Op::AddSection { name, parent } => self.add_section(&name, parent.as_ref()),
+            Op::AddSection {
+                name,
+                parent,
+                note,
+                hue,
+            } => self.add_section(&name, parent.as_ref(), &note, hue),
             Op::AddNote { draft } => self.add_note(&draft),
             Op::EditNote { note, edit } => self.edit_note(&note, &edit),
         }
@@ -91,7 +96,13 @@ impl Board {
             .map_err(lock_failure(&self.folder, what))
     }
 
-    fn add_section(&self, name: &str, parent: Option<&SectionRef>) -> Result<Outcome, Error> {
+    fn add_section(
+        &self,
+        name: &str,
+        parent: Option<&SectionRef>,
+        note: &str,
+        hue: Option<f64>,
+    ) -> Result<Outcome, Error> {
         let held = self.lock(&LockKey::Config, "the board's sections")?;
         let listed_in_the_board_file: BTreeSet<String> = read_board_file(&self.folder)
             .map(|file| file.section_ids().map(str::to_owned).collect())
@@ -111,7 +122,7 @@ impl Board {
                         .any(|entry| entry.id == id.as_str())
             });
             config
-                .add_section(&id, name, parent.as_ref())
+                .add_section(&id, name, parent.as_ref(), note, hue)
                 .map_err(|problem| Error::Invalid { problem })?;
             let name = config
                 .section_entries()
@@ -121,7 +132,7 @@ impl Board {
             Ok(SectionNode {
                 id,
                 name,
-                hue: None,
+                hue,
                 children: Vec::new(),
             })
         })?;

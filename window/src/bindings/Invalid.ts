@@ -1,1 +1,1 @@
-export type Invalid = { "type": "emptySectionName" } | { "type": "sectionNameTaken", name: string, } | { "type": "emptyBoardName" };
+export type Invalid = { "type": "emptySectionName" } | { "type": "sectionNameTaken", name: string, } | { "type": "hueOutOfRange" } | { "type": "emptyBoardName" };

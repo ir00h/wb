@@ -213,6 +213,8 @@ fn a_section_is_added_to_the_config_another_program_saved_between_the_read_and_t
         .apply(Op::AddSection {
             name: "Beds".to_owned(),
             parent: None,
+            note: String::new(),
+            hue: None,
         })
         .expect("section");
 

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use common::{Scratch, append, copy_tree, open_board, tree_bytes};
 use serde_json::{Value, json};
-use wb_model::{BoardConfig, NoteCard, NoteId, Op, Outcome, Parsed, Tag, parse, render};
+use wb_model::{BoardConfig, NoteCard, NoteId, Outcome, Parsed, Tag, parse, render};
 
 const GARDEN: &str = "garden";
 const SEEDS: &str = "garden/seeds";
@@ -239,10 +239,7 @@ fn adding_a_section_keeps_unknown_keys_at_every_level_of_the_config() {
     let mut expected = read(&config_path);
 
     let outcome = open_board(scratch.path(), GARDEN)
-        .apply(Op::AddSection {
-            name: "Orchard".to_owned(),
-            parent: None,
-        })
+        .apply(common::add_section("Orchard"))
         .expect("section");
     let Outcome::SectionAdded { section } = outcome else {
         panic!("no section was added");

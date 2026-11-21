@@ -1,5 +1,5 @@
 use alloc::borrow::ToOwned;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
@@ -12,6 +12,8 @@ use crate::text;
 
 pub const CONFIG_FILE: &str = "board.config.json";
 pub const CONFIG_VERSION: u32 = 1;
+pub const HUE_MIN: f64 = 0.0;
+pub const HUE_MAX: f64 = 360.0;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +66,13 @@ pub struct SectionEntry {
     pub extra: Map<String, Value>,
 }
 
+fn written_hue(hue: f64) -> Option<Number> {
+    if !(HUE_MIN..=HUE_MAX).contains(&hue) {
+        return None;
+    }
+    serde_json::from_str(&hue.to_string()).ok()
+}
+
 fn current_version() -> u32 {
     CONFIG_VERSION
 }
@@ -110,6 +119,8 @@ impl BoardConfig {
         id: &SectionId,
         name: &str,
         parent: Option<&SectionId>,
+        note: &str,
+        hue: Option<f64>,
     ) -> Result<(), Invalid> {
         let name = text::single_spaced(name);
         if section_name(&name).is_empty() {
@@ -122,12 +133,16 @@ impl BoardConfig {
         if taken {
             return Err(Invalid::SectionNameTaken { name });
         }
+        let hue = match hue {
+            Some(hue) => Some(written_hue(hue).ok_or(Invalid::HueOutOfRange)?),
+            None => None,
+        };
         self.sections.get_or_insert_default().push(SectionEntry {
             id: id.as_str().to_owned(),
             name,
             parent: parent.map(str::to_owned),
-            note: String::new(),
-            hue: None,
+            note: text::trim(note).to_owned(),
+            hue,
             extra: Map::new(),
         });
         self.version = self.version.max(CONFIG_VERSION);

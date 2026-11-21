@@ -15,7 +15,9 @@ pub mod text;
 mod wire;
 
 pub use board_file::{BOARD_FILE, BOARD_FORMAT_VERSION, BoardFile};
-pub use config::{BoardConfig, CONFIG_FILE, CONFIG_VERSION, SectionEntry, TagColour};
+pub use config::{
+    BoardConfig, CONFIG_FILE, CONFIG_VERSION, HUE_MAX, HUE_MIN, SectionEntry, TagColour,
+};
 pub use edit::{StaleBase, edit_note};
 pub use error::{Error, Invalid};
 pub use id::{BOARD_FOLDER_MAX_BYTES, BoardId, ITEM_ID_MAX_CHARS, IdError, NoteId, SectionId};

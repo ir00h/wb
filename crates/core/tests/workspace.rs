@@ -118,8 +118,31 @@ fn a_new_note_lands_in_its_section_under_a_name_from_its_title() {
                 parent: Some(SectionRef::Id {
                     id: beds.id.clone(),
                 }),
+                note: " Two by one metre. ".to_owned(),
+                hue: Some(120.0),
             })
             .expect("section"),
+    );
+    assert_eq!(raised.hue, Some(120.0));
+    let config =
+        fs::read_to_string(scratch.path().join("garden/board.config.json")).expect("config");
+    assert!(
+        config.contains(&format!(
+            "      \"parent\": \"{}\",\n      \"note\": \"Two by one metre.\",\n      \"hue\": 120\n",
+            beds.id
+        )),
+        "the section's note and hue are not in the config:\n{config}"
+    );
+    assert_eq!(
+        board.apply(Op::AddSection {
+            name: "Paths".to_owned(),
+            parent: None,
+            note: String::new(),
+            hue: Some(400.0),
+        }),
+        Err(Error::Invalid {
+            problem: Invalid::HueOutOfRange
+        })
     );
     let draft = NoteDraft {
         title: "Plant list".to_owned(),
@@ -196,6 +219,8 @@ fn a_section_that_does_not_exist_cannot_be_named() {
         board.apply(Op::AddSection {
             name: "Shelves".to_owned(),
             parent: Some(missing.clone()),
+            note: String::new(),
+            hue: None,
         }),
         Err(Error::SectionNotFound { section: missing })
     );

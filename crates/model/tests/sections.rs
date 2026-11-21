@@ -89,7 +89,7 @@ fn the_first_listed_of_two_sections_with_one_name_is_found() {
 fn a_section_is_added_at_the_end_under_its_parent() {
     let mut config = config(&json!([{ "id": "s1", "name": "Beds" }]));
     config
-        .add_section(&id("s2"), "  Raised   beds ", Some(&id("s1")))
+        .add_section(&id("s2"), "  Raised   beds ", Some(&id("s1")), "", None)
         .expect("added");
     assert_eq!(
         serde_json::to_value(&config).expect("json")["sections"][1],
@@ -101,18 +101,61 @@ fn a_section_is_added_at_the_end_under_its_parent() {
 fn a_second_section_with_the_same_name_in_the_same_place_is_refused() {
     let mut config = config(&json!([{ "id": "s1", "name": "Beds" }]));
     assert_eq!(
-        config.add_section(&id("s2"), "beds", None),
+        config.add_section(&id("s2"), "beds", None, "", None),
         Err(Invalid::SectionNameTaken {
             name: "beds".to_owned()
         })
     );
     assert_eq!(
-        config.add_section(&id("s2"), " \t", None),
+        config.add_section(&id("s2"), " \t", None, "", None),
         Err(Invalid::EmptySectionName)
     );
     assert!(
         config
-            .add_section(&id("s2"), "Beds", Some(&id("s1")))
+            .add_section(&id("s2"), "Beds", Some(&id("s1")), "", None)
             .is_ok()
     );
+}
+
+#[test]
+fn a_section_is_added_with_its_note_and_its_hue() {
+    let mut config = config(&json!([]));
+    config
+        .add_section(&id("s1"), "Beds", None, "  Two by one metre. ", Some(120.0))
+        .expect("added");
+    config
+        .add_section(&id("s2"), "Paths", None, "", Some(210.5))
+        .expect("added");
+    assert_eq!(
+        config.render().expect("text"),
+        "{\n  \"version\": 1,\n  \"sections\": [\n    {\n      \"id\": \"s1\",\n      \"name\": \"Beds\",\n      \"note\": \"Two by one metre.\",\n      \"hue\": 120\n    },\n    {\n      \"id\": \"s2\",\n      \"name\": \"Paths\",\n      \"hue\": 210.5\n    }\n  ]\n}\n"
+    );
+    assert_eq!(
+        SectionTree::from_config(&config).nodes()[0].hue,
+        Some(120.0)
+    );
+}
+
+#[test]
+fn a_hue_outside_the_colour_circle_is_refused() {
+    let mut config = config(&json!([]));
+    for hue in [-0.5, 360.5, 400.0, f64::NAN, f64::INFINITY] {
+        assert_eq!(
+            config.add_section(&id("s1"), "Beds", None, "", Some(hue)),
+            Err(Invalid::HueOutOfRange),
+            "the hue {hue} was accepted"
+        );
+    }
+    assert!(config.section_entries().is_empty());
+    for hue in [0.0, 360.0] {
+        config
+            .add_section(
+                &id(&format!("s{hue}")),
+                &format!("Bed {hue}"),
+                None,
+                "",
+                Some(hue),
+            )
+            .expect("added");
+    }
 }

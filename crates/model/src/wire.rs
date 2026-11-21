@@ -65,7 +65,7 @@ pub struct NoteDraft {
     pub tags: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     rename_all = "camelCase",
@@ -76,6 +76,8 @@ pub enum Op {
     AddSection {
         name: String,
         parent: Option<SectionRef>,
+        note: String,
+        hue: Option<f64>,
     },
     AddNote {
         draft: NoteDraft,

@@ -323,7 +323,7 @@ fn stall_inside_a_config_change(folder: &Path) -> Stalled {
         thread::sleep(STALL);
         let id = SectionId::parse("sholder").expect("section id");
         config
-            .add_section(&id, "From the holder", None)
+            .add_section(&id, "From the holder", None, "", None)
             .expect("section");
         fs::write(&path, config.render().expect("config text")).expect("config written");
         let left = Instant::now();

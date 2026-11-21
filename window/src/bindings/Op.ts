@@ -3,4 +3,4 @@ import type { NoteEdit } from "./NoteEdit";
 import type { NoteId } from "./NoteId";
 import type { SectionRef } from "./SectionRef";
 
-export type Op = { "type": "addSection", name: string, parent: SectionRef | null, } | { "type": "addNote", draft: NoteDraft, } | { "type": "editNote", note: NoteId, edit: NoteEdit, };
+export type Op = { "type": "addSection", name: string, parent: SectionRef | null, note: string, hue: number | null, } | { "type": "addNote", draft: NoteDraft, } | { "type": "editNote", note: NoteId, edit: NoteEdit, };

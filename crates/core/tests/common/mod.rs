@@ -116,6 +116,8 @@ pub fn add_section(name: &str) -> Op {
     Op::AddSection {
         name: name.to_owned(),
         parent: None,
+        note: String::new(),
+        hue: None,
     }
 }
 
