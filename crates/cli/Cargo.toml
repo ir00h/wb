@@ -1,0 +1,19 @@
+[package]
+name = "wb"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "wb"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+wb-core.workspace = true
+wb-model.workspace = true
+
+[lints]
+workspace = true
