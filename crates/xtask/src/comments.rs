@@ -61,7 +61,7 @@ fn syntax_of(path: &str) -> Option<Syntax> {
         "Cargo.lock" => Some(Syntax::Toml),
         ".gitignore" | ".gitattributes" => Some(Syntax::IgnoreList),
         ".node-version" => Some(Syntax::VersionLine),
-        "LICENSE" => Some(Syntax::Plain),
+        "LICENSE" | "HEAD" => Some(Syntax::Plain),
         _ => None,
     };
     if by_name.is_some() {
@@ -78,6 +78,7 @@ fn syntax_of(path: &str) -> Option<Syntax> {
         "yml" | "yaml" => Syntax::Yaml,
         "sh" => Syntax::Shell,
         "json" => Syntax::Json,
+        "jsonl" => Syntax::Plain,
         "png" | "icns" | "ico" => Syntax::Binary,
         _ => return None,
     })

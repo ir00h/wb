@@ -1,0 +1,11 @@
+---
+id: nivu23r
+section: Beds
+tags: [chore]
+---
+
+# Turn the heap
+
+Once a month. Linked from [[npp7oi4|the tomato plan]].
+
+Use a fork, not a spade.

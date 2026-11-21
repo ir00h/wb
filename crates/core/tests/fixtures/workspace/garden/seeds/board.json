@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "name": "Seeds",
+  "cards": {
+    "n2rv8u7": {
+      "x": 60.0,
+      "y": 100.0,
+      "section": "s0kgwmj",
+      "noteSection": "Packets"
+    }
+  },
+  "sections": {
+    "s0kgwmj": {
+      "name": "Packets",
+      "note": "",
+      "hue": 210.0,
+      "x": 40.0,
+      "y": 40.0,
+      "w": 380.0,
+      "h": 520.0
+    }
+  },
+  "configSections": [
+    "s0kgwmj"
+  ]
+}

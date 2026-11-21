@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "tags": [
+    {
+      "name": "idea"
+    },
+    {
+      "name": "feature",
+      "hue": 201
+    },
+    {
+      "name": "decision",
+      "hue": 140
+    },
+    {
+      "name": "question",
+      "hue": 36
+    },
+    {
+      "name": "lesson",
+      "hue": 0
+    },
+    {
+      "name": "session"
+    },
+    {
+      "name": "vegetable",
+      "hue": 120
+    },
+    {
+      "name": "herb",
+      "hue": 200
+    },
+    {
+      "name": "chore"
+    }
+  ],
+  "sections": [
+    {
+      "id": "s1tytqd",
+      "name": "Beds",
+      "note": "What grows where",
+      "hue": 120
+    },
+    {
+      "id": "s6dj313",
+      "name": "Raised beds",
+      "parent": "s1tytqd"
+    },
+    {
+      "id": "scrizb6",
+      "name": "Harvest",
+      "hue": 40,
+      "layout": {
+        "width": {
+          "size": "fit",
+          "max": 900
+        },
+        "view": "compact",
+        "cardOrder": "title"
+      },
+      "next": "szevnsg"
+    },
+    {
+      "id": "szevnsg",
+      "name": "Compost"
+    }
+  ],
+  "defaultSection": "s1tytqd",
+  "archiveSection": "szevnsg",
+  "layout": {
+    "arrange": "row"
+  },
+  "requests": [
+    {
+      "id": "ro2wltq",
+      "kind": "tidy",
+      "target": "s1tytqd",
+      "layout": {
+        "cardColumns": 2
+      },
+      "at": 1795274002749
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+---
+id: npp7oi4
+section: Beds / Raised beds
+tags: [vegetable, chore]
+source: seed catalogue
+variety: San Marzano
+---
+
+# Tomato plan for the south fence
+
+Six plants along the south fence. Stake them in June.
+
+Water at the root, never the leaves.
+
+## Attachments
+
+- [bed-map.html](files/npp7oi4/bed-map.html)

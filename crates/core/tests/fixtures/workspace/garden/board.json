@@ -1,0 +1,110 @@
+{
+  "version": 2,
+  "name": "Garden",
+  "cards": {
+    "n0tray1": {
+      "x": 900.0,
+      "y": 700.0,
+      "deleted": {
+        "at": 1795000000000.0,
+        "title": "Old seed tray",
+        "body": "Cracked, recycle it.",
+        "source": ""
+      },
+      "section": "s1tytqd"
+    },
+    "n7adqwg": {
+      "x": 60.0,
+      "y": 100.0,
+      "board": "seeds",
+      "section": "scrizb6",
+      "noteSection": "Harvest"
+    },
+    "n7sv7us": {
+      "x": 90.0,
+      "y": 240.0,
+      "section": "s6dj313",
+      "noteSection": "Beds / Raised beds"
+    },
+    "ncffqm3": {
+      "x": 120.0,
+      "y": 380.0,
+      "section": "scrizb6",
+      "noteSection": "Harvest"
+    },
+    "ngd1ddx": {
+      "x": 150.0,
+      "y": 520.0,
+      "section": "szevnsg",
+      "noteSection": "Compost"
+    },
+    "nivu23r": {
+      "x": 180.0,
+      "y": 660.0,
+      "section": "s1tytqd",
+      "noteSection": "Beds"
+    },
+    "nmrr8rt": {
+      "x": 210.0,
+      "y": 800.0,
+      "noteSection": ""
+    },
+    "nn9fbyt": {
+      "x": 240.0,
+      "y": 940.0,
+      "section": "scrizb6",
+      "noteSection": "Harvest"
+    },
+    "npp7oi4": {
+      "x": 270.0,
+      "y": 1080.0,
+      "section": "s6dj313",
+      "noteSection": "Beds / Raised beds"
+    }
+  },
+  "sections": {
+    "s1tytqd": {
+      "name": "Beds",
+      "note": "What grows where",
+      "hue": 120.0,
+      "x": 40.0,
+      "y": 40.0,
+      "w": 380.0,
+      "h": 520.0
+    },
+    "s6dj313": {
+      "name": "Raised beds",
+      "note": "",
+      "parent": "s1tytqd",
+      "hue": 210.0,
+      "x": 460.0,
+      "y": 40.0,
+      "w": 380.0,
+      "h": 520.0
+    },
+    "scrizb6": {
+      "name": "Harvest",
+      "note": "",
+      "hue": 40.0,
+      "x": 880.0,
+      "y": 40.0,
+      "w": 380.0,
+      "h": 520.0
+    },
+    "szevnsg": {
+      "name": "Compost",
+      "note": "",
+      "hue": 210.0,
+      "x": 1300.0,
+      "y": 40.0,
+      "w": 380.0,
+      "h": 520.0
+    }
+  },
+  "configSections": [
+    "s1tytqd",
+    "s6dj313",
+    "scrizb6",
+    "szevnsg"
+  ]
+}
