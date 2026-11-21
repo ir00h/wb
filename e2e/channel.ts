@@ -1,6 +1,5 @@
 import { type ChildProcess, execFile, spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type {
@@ -20,6 +19,8 @@ const KILL_GRACE_MS = 3_000;
 const DEFAULT_WAIT_MS = 5_000;
 const POLL_MS = 50;
 const FRONTMOST_SAMPLE_MS = 100;
+const EXIT_GRACE_MS = 2_000;
+const OUTPUT_TAIL_LINES = 8;
 
 const run = promisify(execFile);
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -42,15 +43,40 @@ async function seed(folder: string, files: Files): Promise<void> {
   }
 }
 
+function hasEnded(child: ChildProcess): boolean {
+  return child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
+}
+
 function exited(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
+  if (hasEnded(child)) {
     return Promise.resolve();
   }
   return new Promise((resolve) => child.once("exit", () => resolve()));
 }
 
+function ending(child: ChildProcess): string {
+  return child.signalCode === null
+    ? `exited with code ${child.exitCode}`
+    : `was killed by ${child.signalCode}`;
+}
+
+function tail(output: string): string {
+  const lines = output.trimEnd().split("\n").slice(-OUTPUT_TAIL_LINES);
+  return lines.length === 1 && lines[0] === "" ? "" : `\n${lines.join("\n")}`;
+}
+
+function startFailure(shell: string, error: NodeJS.ErrnoException): ChannelFailure {
+  const reason =
+    error.code === "ENOENT"
+      ? "no file exists at that path"
+      : error.code === "EACCES"
+        ? "the file is not executable"
+        : error.message;
+  return new ChannelFailure(`the app at ${shell} could not be started: ${reason}`);
+}
+
 async function stop(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
+  if (hasEnded(child)) {
     return;
   }
   child.kill("SIGTERM");
@@ -64,7 +90,11 @@ async function stop(child: ChildProcess): Promise<void> {
   }
 }
 
-function announcedAddress(child: ChildProcess, output: () => string): Promise<string> {
+function announcedAddress(
+  shell: string,
+  child: ChildProcess,
+  output: () => string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new ChannelFailure(`the app did not announce its channel:\n${output()}`)),
@@ -78,11 +108,15 @@ function announcedAddress(child: ChildProcess, output: () => string): Promise<st
       }
     };
     child.stdout?.on("data", look);
-    child.once("exit", (code, signal) => {
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(startFailure(shell, error));
+    });
+    child.once("exit", () => {
       clearTimeout(timer);
       reject(
         new ChannelFailure(
-          `the app exited (${code ?? signal}) before it announced its channel:\n${output()}`,
+          `the app ${ending(child)} before it announced its channel${tail(output())}`,
         ),
       );
     });
@@ -122,25 +156,44 @@ class ChannelApp implements RunningApp {
   readonly workspace: string;
   readonly #base: string;
   readonly #child: ChildProcess;
+  readonly #output: () => string;
   readonly #stopWatchingFocus: (() => number) | null;
 
   constructor(
     workspace: string,
     base: string,
     child: ChildProcess,
+    output: () => string,
     stopWatchingFocus: (() => number) | null,
   ) {
     this.workspace = workspace;
     this.#base = base;
     this.#child = child;
+    this.#output = output;
     this.#stopWatchingFocus = stopWatchingFocus;
   }
 
+  async #unreachable(request: string, cause: unknown): Promise<ChannelFailure> {
+    await Promise.race([exited(this.#child), sleep(EXIT_GRACE_MS)]);
+    if (hasEnded(this.#child)) {
+      return new ChannelFailure(
+        `the app ${ending(this.#child)} during ${request}${tail(this.#output())}`,
+      );
+    }
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    return new ChannelFailure(`${request} could not reach the app, which still runs: ${reason}`);
+  }
+
   async #request(method: "GET" | "POST", route: string, body?: string): Promise<Response> {
-    const response = await fetch(
-      `${this.#base}${route}`,
-      body === undefined ? { method } : { method, body },
-    );
+    let response: Response;
+    try {
+      response = await fetch(
+        `${this.#base}${route}`,
+        body === undefined ? { method } : { method, body },
+      );
+    } catch (error) {
+      throw await this.#unreachable(`${method} ${route}`, error);
+    }
     if (response.status === 422) {
       throw new Error(`the script threw in the web view: ${await response.text()}`);
     }
@@ -213,11 +266,8 @@ class ChannelApp implements RunningApp {
   }
 
   isRunning(): boolean {
-    if (this.#child.exitCode !== null || this.#child.signalCode !== null) {
-      return false;
-    }
     const pid = this.#child.pid;
-    if (pid === undefined) {
+    if (pid === undefined || hasEnded(this.#child)) {
       return false;
     }
     try {
@@ -239,17 +289,19 @@ class ChannelApp implements RunningApp {
 export class ChannelDriver implements Driver {
   readonly #shell: string;
   readonly #background: boolean;
+  readonly #scratch: string;
   readonly #children: ChildProcess[] = [];
   readonly #focusWatchers: (() => number)[] = [];
   readonly #folders: string[] = [];
 
-  constructor(shell: string, background: boolean) {
+  constructor(shell: string, background: boolean, scratch: string) {
     this.#shell = shell;
     this.#background = background;
+    this.#scratch = scratch;
   }
 
   async launch(options: LaunchOptions = {}): Promise<RunningApp> {
-    const root = await mkdtemp(join(tmpdir(), "whiteboard-e2e-"));
+    const root = await mkdtemp(join(this.#scratch, "launch-"));
     this.#folders.push(root);
     const workspace = join(root, "workspace");
     const data = join(root, "data");
@@ -273,6 +325,9 @@ export class ChannelDriver implements Driver {
     };
     child.stdout.on("data", collect);
     child.stderr.on("data", collect);
+    child.on("error", (error) => {
+      output += `${error.message}\n`;
+    });
     this.#children.push(child);
     const watching =
       this.#background && process.platform === "darwin" && child.pid !== undefined
@@ -281,8 +336,8 @@ export class ChannelDriver implements Driver {
     if (watching !== null) {
       this.#focusWatchers.push(watching);
     }
-    const address = await announcedAddress(child, () => output);
-    return new ChannelApp(workspace, `http://${address}`, child, watching);
+    const address = await announcedAddress(this.#shell, child, () => output);
+    return new ChannelApp(workspace, `http://${address}`, child, () => output, watching);
   }
 
   async dispose(): Promise<void> {

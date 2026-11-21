@@ -1,8 +1,8 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { backgroundRequested, ChannelDriver } from "./channel.ts";
 import { JOURNEYS } from "./journeys.ts";
+import { claimRunFolder, removeAbandonedRuns } from "./scratch.ts";
 
 const shell = process.env.WB_E2E_SHELL;
 if (shell === undefined) {
@@ -10,24 +10,29 @@ if (shell === undefined) {
   process.exit(2);
 }
 
+for (const folder of await removeAbandonedRuns()) {
+  console.log(`      removed ${folder}, left by a run that no longer exists`);
+}
+
+const scratch = await claimRunFolder();
 const keptArtifacts = process.env.WB_E2E_ARTIFACTS;
-const artifacts =
-  keptArtifacts === undefined
-    ? await mkdtemp(join(tmpdir(), "whiteboard-e2e-artifacts-"))
-    : resolve(keptArtifacts);
+const artifacts = keptArtifacts === undefined ? join(scratch, "artifacts") : resolve(keptArtifacts);
 await mkdir(artifacts, { recursive: true });
 
 const drivers = new Set<ChannelDriver>();
 const disposeAll = () => Promise.all([...drivers].map((driver) => driver.dispose()));
+const removeScratch = () => rm(scratch, { recursive: true, force: true });
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.once(signal, () => {
-    void disposeAll().finally(() => process.exit(130));
+    void disposeAll()
+      .finally(removeScratch)
+      .finally(() => process.exit(130));
   });
 }
 
 let failures = 0;
 for (const journey of JOURNEYS) {
-  const driver = new ChannelDriver(shell, backgroundRequested());
+  const driver = new ChannelDriver(shell, backgroundRequested(), scratch);
   drivers.add(driver);
   const started = performance.now();
   let failure: unknown = null;
@@ -49,7 +54,5 @@ for (const journey of JOURNEYS) {
   }
 }
 
-if (keptArtifacts === undefined) {
-  await rm(artifacts, { recursive: true, force: true });
-}
+await removeScratch();
 process.exitCode = failures === 0 ? 0 : 1;
