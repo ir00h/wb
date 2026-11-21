@@ -1,3 +1,4 @@
+mod bindings;
 mod check;
 mod comments;
 mod commits;
@@ -8,7 +9,7 @@ mod process;
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-const USAGE: &str = "usage: cargo xtask check [step]\nsteps: ";
+const USAGE: &str = "usage: cargo xtask check [step] | cargo xtask bindings\nsteps: ";
 
 fn repository_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -34,6 +35,13 @@ fn main() -> ExitCode {
         ["check", name] => match check::Step::from_name(name) {
             Some(step) => check::run(&root, &[step]),
             None => print_usage(),
+        },
+        ["bindings"] => match bindings::write(&root) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(report) => {
+                eprintln!("{report}");
+                ExitCode::FAILURE
+            }
         },
         _ => print_usage(),
     }

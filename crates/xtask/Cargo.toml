@@ -12,6 +12,8 @@ oxc_parser.workspace = true
 oxc_span.workspace = true
 ra-ap-rustc_lexer.workspace = true
 serde_json.workspace = true
+ts-rs.workspace = true
+wb-model = { workspace = true, features = ["ts"] }
 
 [lints]
 workspace = true
