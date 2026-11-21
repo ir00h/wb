@@ -21,7 +21,7 @@ const LAYERS: &[Layer] = &[
         package: "wb-model",
         role: "pure shapes and rules",
         pure: true,
-        normal: &["serde", "thiserror", "ts-rs"],
+        normal: &["serde", "serde_json", "thiserror", "ts-rs"],
         build: &[],
         dev: &["serde_json"],
     },
@@ -29,7 +29,7 @@ const LAYERS: &[Layer] = &[
         package: "wb-core",
         role: "boards on disk",
         pure: false,
-        normal: &["wb-model"],
+        normal: &["serde_json", "thiserror", "wb-model"],
         build: &[],
         dev: &[],
     },
@@ -339,7 +339,7 @@ mod tests {
         let found = packages(&[
             (
                 "wb-model",
-                &[("serde_json", Kind::Normal), ("wb-core", Kind::Dev)],
+                &[("serde_json", Kind::Build), ("wb-core", Kind::Dev)],
             ),
             (
                 "wb-core",
@@ -353,7 +353,7 @@ mod tests {
                 "crates/wb/Cargo.toml: wb (the command-line tool) depends directly on tauri-utils as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
                 "crates/wb-core/Cargo.toml: wb-core (boards on disk) depends directly on clap_builder as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
                 "crates/wb-core/Cargo.toml: wb-core (boards on disk) depends directly on clap as a dev dependency; add it to the table in `layers.rs` if the layer may use it",
-                "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on serde_json as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
+                "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on serde_json as a build dependency; add it to the table in `layers.rs` if the layer may use it",
                 "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on wb-core as a dev dependency; add it to the table in `layers.rs` if the layer may use it",
             ]
         );
