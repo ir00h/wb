@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ts_rs::{Config, ExportError, TS};
-use wb_model::{BoardId, NoteId, SectionId};
+use wb_model::{BoardId, NoteId, SectionId, SectionPath, Tag};
 
 use crate::finding;
 use crate::shapes::{self, NEVER_CROSSES, SourceFile};
@@ -21,6 +21,8 @@ fn export_every_type(config: &Config) -> Result<(), ExportError> {
     BoardId::export_all(config)?;
     NoteId::export_all(config)?;
     SectionId::export_all(config)?;
+    Tag::export_all(config)?;
+    SectionPath::export_all(config)?;
     Ok(())
 }
 
