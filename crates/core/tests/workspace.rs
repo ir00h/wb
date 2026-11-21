@@ -5,8 +5,8 @@ use std::fs;
 use common::{Scratch, add_note, add_section, tree_bytes};
 use wb_core::Workspace;
 use wb_model::{
-    BoardId, Error, Invalid, NoteDraft, NoteId, Op, Outcome, SectionNode, SectionPath, SectionRef,
-    Tag,
+    BoardId, DraftSection, Error, Invalid, NoteDraft, NoteId, Op, Outcome, SectionNode,
+    SectionPath, SectionRef, Tag,
 };
 
 fn board_id(text: &str) -> BoardId {
@@ -147,14 +147,13 @@ fn a_new_note_lands_in_its_section_under_a_name_from_its_title() {
     let draft = NoteDraft {
         title: "Plant list".to_owned(),
         body: "Tomatoes\n".to_owned(),
-        section: Some(SectionRef::Path {
-            path: "beds / raised beds"
-                .parse::<String>()
-                .expect("text")
-                .try_into()
-                .expect("path"),
-        }),
+        section: DraftSection::Named {
+            section: SectionRef::Path {
+                path: path("beds / raised beds"),
+            },
+        },
         tags: vec!["Vegetable".to_owned(), "#open question".to_owned()],
+        source: " seed catalogue ".to_owned(),
     };
     let Outcome::Applied { note } = board.apply(Op::AddNote { draft }).expect("note") else {
         panic!("the note was not added");
@@ -169,7 +168,7 @@ fn a_new_note_lands_in_its_section_under_a_name_from_its_title() {
         )
         .expect("note file"),
         format!(
-            "---\nid: {}\nsection: Beds / Raised beds\ntags: [vegetable, open-question]\n---\n\n# Plant list\n\nTomatoes\n",
+            "---\nid: {}\nsection: Beds / Raised beds\ntags: [vegetable, open-question]\nsource: seed catalogue\n---\n\n# Plant list\n\nTomatoes\n",
             note.id
         )
     );
@@ -195,7 +194,36 @@ fn a_note_that_names_no_section_goes_to_the_default_section() {
         1,
     );
     fs::write(&config, with_default).expect("config");
-    assert_eq!(add_note(&board, "Plant list", "").section, Some(beds.id));
+    assert_eq!(
+        add_note(&board, "Plant list", "").section,
+        Some(beds.id.clone())
+    );
+    let outside_every_section = NoteDraft {
+        title: "Loose thought".to_owned(),
+        section: DraftSection::NoSection,
+        ..NoteDraft::default()
+    };
+    let Outcome::Applied { note } = board
+        .apply(Op::AddNote {
+            draft: outside_every_section,
+        })
+        .expect("note")
+    else {
+        panic!("the note was not added");
+    };
+    assert_eq!(
+        note.section, None,
+        "a note that asked for no section was put into the default section"
+    );
+    assert!(
+        !fs::read_to_string(
+            scratch
+                .path()
+                .join(format!("garden/loose-thought-{}.md", note.id))
+        )
+        .expect("note file")
+        .contains("section:")
+    );
 }
 
 #[test]
@@ -206,7 +234,9 @@ fn a_section_that_does_not_exist_cannot_be_named() {
         path: path("Cellar"),
     };
     let draft = NoteDraft {
-        section: Some(missing.clone()),
+        section: DraftSection::Named {
+            section: missing.clone(),
+        },
         ..NoteDraft::default()
     };
     assert_eq!(

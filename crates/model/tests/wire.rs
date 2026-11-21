@@ -1,7 +1,8 @@
 use serde_json::json;
 use wb_model::{
-    BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, Note, NoteCard, NoteEdit,
-    NoteId, Op, Outcome, SectionId, SectionNode, StaleBase, Tag, diff, edit_note,
+    BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, Note,
+    NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, SectionId, SectionNode, SectionRef,
+    StaleBase, Tag, diff, edit_note,
 };
 
 fn note_id(text: &str) -> NoteId {
@@ -190,4 +191,38 @@ fn operations_and_outcomes_cross_the_bridge_as_tagged_objects() {
             "current": { "id": "n1", "title": "T", "body": "", "tags": [], "section": null }
         })
     );
+}
+
+#[test]
+fn a_draft_says_where_its_note_goes_in_one_of_three_ways() {
+    let draft = |section: DraftSection| NoteDraft {
+        title: "Plant list".to_owned(),
+        section,
+        ..NoteDraft::default()
+    };
+    let sent = |section: serde_json::Value| json!({ "title": "Plant list", "body": "", "section": section, "tags": [], "source": "" });
+    let named = DraftSection::Named {
+        section: SectionRef::Id {
+            id: SectionId::parse("s1").expect("section id"),
+        },
+    };
+    for (section, written) in [
+        (DraftSection::Default, json!({ "type": "default" })),
+        (DraftSection::NoSection, json!({ "type": "noSection" })),
+        (
+            named,
+            json!({ "type": "named", "section": { "type": "id", "id": "s1" } }),
+        ),
+    ] {
+        let draft = draft(section);
+        assert_eq!(
+            serde_json::to_value(&draft).expect("json"),
+            sent(written.clone())
+        );
+        assert_eq!(
+            serde_json::from_value::<NoteDraft>(sent(written)).expect("draft"),
+            draft
+        );
+    }
+    assert_eq!(NoteDraft::default().section, DraftSection::Default);
 }

@@ -61,8 +61,25 @@ impl NoteCard {
 pub struct NoteDraft {
     pub title: String,
     pub body: String,
-    pub section: Option<SectionRef>,
+    pub section: DraftSection,
     pub tags: Vec<String>,
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub enum DraftSection {
+    #[default]
+    Default,
+    NoSection,
+    Named {
+        section: SectionRef,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

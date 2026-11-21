@@ -31,6 +31,6 @@ pub use section_path::{
 pub use sections::{SectionNode, SectionRef, SectionTree};
 pub use tag::{EmptyTag, Tag};
 pub use wire::{
-    BoardEvent, BoardInfo, BoardSnapshot, BodyChange, Change, NoteCard, NoteDraft, NoteEdit, Op,
-    Outcome, diff,
+    BoardEvent, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, NoteCard, NoteDraft,
+    NoteEdit, Op, Outcome, diff,
 };

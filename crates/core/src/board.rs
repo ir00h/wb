@@ -4,9 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use wb_model::{
-    BOARD_FILE, BoardFile, BoardId, BoardInfo, BoardSnapshot, Error, Note, NoteCard, NoteDraft,
-    NoteEdit, NoteId, Op, Outcome, Parsed, Placement, SectionId, SectionNode, SectionRef,
-    SectionTree, Tag, clean_body, clean_title, edit_note, file_name, parse, render,
+    BOARD_FILE, BoardFile, BoardId, BoardInfo, BoardSnapshot, DraftSection, Error, Note, NoteCard,
+    NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, Placement, SectionId, SectionNode,
+    SectionRef, SectionTree, Tag, clean_body, clean_title, edit_note, file_name, parse, render,
+    text,
 };
 
 use crate::failure::{io_failure, kept_changing, lock_failure, malformed};
@@ -143,8 +144,9 @@ impl Board {
         let config = config::read_for_a_write(&self.folder)?;
         let sections = SectionTree::from_config(&config);
         let section = match &draft.section {
-            Some(reference) => Some(section_named(&sections, reference)?),
-            None => config
+            DraftSection::Named { section } => Some(section_named(&sections, section)?),
+            DraftSection::NoSection => None,
+            DraftSection::Default => config
                 .default_section
                 .as_deref()
                 .and_then(|id| SectionId::parse(id).ok())
@@ -165,6 +167,7 @@ impl Board {
                     ..Placement::default()
                 },
                 tags: Tag::list(&draft.tags),
+                source: text::trim(&draft.source).to_owned(),
                 title: clean_title(&draft.title),
                 body: clean_body(&draft.body),
                 ..Note::new(id)

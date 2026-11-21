@@ -5,8 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ts_rs::{Config, ExportError, TS};
 use wb_model::{
-    BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, Error, Invalid, NoteCard,
-    NoteDraft, NoteEdit, NoteId, Op, Outcome, SectionId, SectionNode, SectionPath, SectionRef, Tag,
+    BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, Error,
+    Invalid, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, SectionId, SectionNode,
+    SectionPath, SectionRef, Tag,
 };
 
 use crate::finding;
@@ -31,6 +32,7 @@ fn export_every_type(config: &Config) -> Result<(), ExportError> {
     NoteCard::export_all(config)?;
     BoardSnapshot::export_all(config)?;
     SectionRef::export_all(config)?;
+    DraftSection::export_all(config)?;
     NoteDraft::export_all(config)?;
     Change::<String>::export_all(config)?;
     BodyChange::export_all(config)?;
