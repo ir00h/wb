@@ -4,6 +4,7 @@ mod comments;
 mod commits;
 mod finding;
 mod hygiene;
+mod layers;
 mod process;
 mod window;
 
