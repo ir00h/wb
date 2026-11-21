@@ -1,4 +1,5 @@
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -20,6 +21,11 @@ pub enum Error {
     BoardNotFound { board: BoardId },
     #[error("there is no note `{note}` on this board")]
     NoteNotFound { note: NoteId },
+    #[error(
+        "the note `{note}` is in more than one file (`{}`); keep one and remove the others or give them another id",
+        files.join("`, `")
+    )]
+    DuplicateNote { note: NoteId, files: Vec<String> },
     #[error("there is no section {section} on this board")]
     SectionNotFound { section: SectionRef },
     #[error("{problem}")]

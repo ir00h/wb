@@ -104,3 +104,99 @@ fn an_edit_keeps_the_permission_bits_of_a_note_and_of_the_config() {
         mode(&config)
     );
 }
+
+const FIRST_COPY: &str = "---\nid: ndup001\n---\n\n# Apple\n\nfirst copy\n";
+const SECOND_COPY: &str = "---\nid: ndup001\n---\n\n# Apple\n\nsecond copy\n";
+
+fn duplicated() -> wb_model::NoteId {
+    wb_model::NoteId::parse("ndup001").expect("note id")
+}
+
+#[test]
+fn an_edit_lands_in_the_file_the_board_shows_when_a_copy_holds_the_same_id() {
+    let scratch = Scratch::new("copy-of-a-note");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    fs::write(folder.join("apple-ndup001.md"), FIRST_COPY).expect("note");
+    fs::write(folder.join("apple-ndup001 2.md"), SECOND_COPY).expect("copy made by a sync tool");
+    let id = duplicated();
+
+    let shown = board.snapshot().expect("snapshot");
+    assert_eq!(shown.notes[0].body, "first copy");
+    assert_eq!(shown.strays, ["apple-ndup001 2.md"]);
+
+    board
+        .apply(common::set_body(&id, Some("first copy"), "edited"))
+        .expect("body edit");
+    board
+        .apply(common::set_title(&id, Some("Apple"), "Zucchini"))
+        .expect("title edit");
+
+    let shown = board.snapshot().expect("snapshot");
+    assert_eq!(
+        (shown.notes[0].title.as_str(), shown.notes[0].body.as_str()),
+        ("Zucchini", "edited"),
+        "the board shows a file the edit did not go to; strays: {:?}",
+        shown.strays
+    );
+    assert_eq!(shown.strays, ["apple-ndup001 2.md"]);
+    assert_eq!(board.note(&id).expect("note").body, "edited");
+    assert_eq!(
+        fs::read_to_string(folder.join("apple-ndup001 2.md")).expect("copy"),
+        SECOND_COPY
+    );
+}
+
+#[test]
+fn an_edit_is_refused_when_two_files_named_for_one_id_hold_it() {
+    let scratch = Scratch::new("two-files-one-id");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    fs::write(folder.join("apple-ndup001.md"), FIRST_COPY).expect("note");
+    fs::write(folder.join("pear-ndup001.md"), SECOND_COPY).expect("second file");
+    let id = duplicated();
+
+    let shown = board.snapshot().expect("snapshot");
+    assert_eq!(shown.notes.len(), 1);
+    assert_eq!(shown.notes[0].body, "first copy");
+    assert_eq!(shown.strays, ["pear-ndup001.md"]);
+
+    let answer = board.apply(common::append(&id, "edited"));
+    assert_eq!(
+        answer,
+        Err(wb_model::Error::DuplicateNote {
+            note: id.clone(),
+            files: vec!["apple-ndup001.md".to_owned(), "pear-ndup001.md".to_owned()],
+        }),
+        "an edit of an id that two files hold was not refused"
+    );
+    assert_eq!(
+        fs::read_to_string(folder.join("apple-ndup001.md")).expect("note"),
+        FIRST_COPY
+    );
+    assert_eq!(
+        fs::read_to_string(folder.join("pear-ndup001.md")).expect("second file"),
+        SECOND_COPY
+    );
+    assert!(matches!(
+        board.note(&id),
+        Err(wb_model::Error::DuplicateNote { .. })
+    ));
+}
+
+#[test]
+fn an_edit_is_refused_when_two_files_named_for_nothing_hold_one_id() {
+    let scratch = Scratch::new("two-plain-files-one-id");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    fs::write(folder.join("apple.md"), FIRST_COPY).expect("note");
+    fs::write(folder.join("pear.md"), SECOND_COPY).expect("second file");
+
+    assert_eq!(
+        board.apply(common::append(&duplicated(), "edited")),
+        Err(wb_model::Error::DuplicateNote {
+            note: duplicated(),
+            files: vec!["apple.md".to_owned(), "pear.md".to_owned()],
+        })
+    );
+}

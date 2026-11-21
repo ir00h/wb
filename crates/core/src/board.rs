@@ -143,8 +143,10 @@ impl Board {
         loop {
             let id = ids::new_note_id(|id| taken.contains(id.as_str()));
             let held = self.lock(&LockKey::Note(id.clone()), "the new note")?;
-            if folder::find(&self.folder, &id)?.is_some() {
-                continue;
+            match folder::find(&self.folder, &id) {
+                Ok(None) => {}
+                Ok(Some(_)) | Err(Error::DuplicateNote { .. }) => continue,
+                Err(error) => return Err(error),
             }
             let note = Note {
                 placement: Placement {
