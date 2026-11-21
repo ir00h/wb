@@ -2,33 +2,39 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::{bindings, comments, commits, hygiene, process};
+use crate::{bindings, comments, commits, hygiene, process, window};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
     Comments,
+    Layers,
     Bindings,
     Commits,
     Hygiene,
     Rust,
+    Window,
 }
 
 impl Step {
     pub const ALL: &'static [Step] = &[
         Step::Comments,
+        Step::Layers,
         Step::Bindings,
         Step::Commits,
         Step::Hygiene,
         Step::Rust,
+        Step::Window,
     ];
 
     pub fn name(self) -> &'static str {
         match self {
             Step::Comments => "comments",
+            Step::Layers => "layers",
             Step::Bindings => "bindings",
             Step::Commits => "commits",
             Step::Hygiene => "hygiene",
             Step::Rust => "rust",
+            Step::Window => "window",
         }
     }
 
@@ -39,10 +45,12 @@ impl Step {
     fn run(self, root: &Path) -> Result<(), String> {
         match self {
             Step::Comments => comments::check(root),
+            Step::Layers => window::layers(root),
             Step::Bindings => bindings::check(root),
             Step::Commits => commits::check(root),
             Step::Hygiene => hygiene::check(root),
             Step::Rust => rust(root),
+            Step::Window => window::check(root),
         }
     }
 }

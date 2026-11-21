@@ -1,0 +1,125 @@
+{
+  "forbidden": [
+    {
+      "name": "no-import-cycles",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "circular": true
+      }
+    },
+    {
+      "name": "resolve-every-import",
+      "severity": "error",
+      "from": {},
+      "to": {
+        "couldNotResolve": true
+      }
+    },
+    {
+      "name": "import-only-window-src-files-and-packages",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/"
+      },
+      "to": {
+        "pathNot": ["^window/src/", "node_modules/"]
+      }
+    },
+    {
+      "name": "only-tests-import-vitest",
+      "severity": "error",
+      "from": {
+        "pathNot": "\\.test\\.tsx?$"
+      },
+      "to": {
+        "path": "node_modules/vitest/"
+      }
+    },
+    {
+      "name": "bindings-import-only-bindings",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/bindings/"
+      },
+      "to": {
+        "pathNot": ["^window/src/bindings/", "node_modules/vitest/"]
+      }
+    },
+    {
+      "name": "domain-imports-only-bindings-and-domain",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/domain/"
+      },
+      "to": {
+        "pathNot": ["^window/src/(bindings|domain)/", "node_modules/vitest/"]
+      }
+    },
+    {
+      "name": "only-bridge-imports-tauri",
+      "severity": "error",
+      "from": {
+        "pathNot": "^window/src/bridge/"
+      },
+      "to": {
+        "path": "node_modules/@tauri-apps/"
+      }
+    },
+    {
+      "name": "bridge-imports-only-tauri-bindings-domain-and-bridge",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/bridge/"
+      },
+      "to": {
+        "pathNot": [
+          "^window/src/(bindings|domain|bridge)/",
+          "node_modules/@tauri-apps/",
+          "node_modules/vitest/"
+        ]
+      }
+    },
+    {
+      "name": "state-imports-only-zustand-bridge-domain-bindings-and-state",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/state/"
+      },
+      "to": {
+        "pathNot": [
+          "^window/src/(bindings|domain|bridge|state)/",
+          "node_modules/zustand/",
+          "node_modules/vitest/"
+        ]
+      }
+    },
+    {
+      "name": "ui-imports-only-react-state-domain-bindings-and-ui",
+      "severity": "error",
+      "from": {
+        "path": "^window/src/ui/"
+      },
+      "to": {
+        "pathNot": [
+          "^window/src/(bindings|domain|state|ui)/",
+          "node_modules/(@types/)?react(-dom)?/",
+          "node_modules/vitest/"
+        ]
+      }
+    }
+  ],
+  "options": {
+    "doNotFollow": {
+      "path": "node_modules"
+    },
+    "tsPreCompilationDeps": true,
+    "tsConfig": {
+      "fileName": "tsconfig.json"
+    },
+    "enhancedResolveOptions": {
+      "exportsFields": ["exports"],
+      "conditionNames": ["import", "require", "node", "default", "types"]
+    }
+  }
+}

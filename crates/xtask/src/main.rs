@@ -5,6 +5,7 @@ mod commits;
 mod finding;
 mod hygiene;
 mod process;
+mod window;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

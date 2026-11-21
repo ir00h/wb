@@ -1,0 +1,21 @@
+:root {
+  --title-bar-height: 52px;
+  color-scheme: light dark;
+  font-family: system-ui, sans-serif;
+}
+
+body {
+  margin: 0;
+}
+
+.placeholder {
+  display: grid;
+  place-content: center;
+  min-height: calc(100vh - var(--title-bar-height));
+  padding-top: var(--title-bar-height);
+  text-align: center;
+}
+
+.host {
+  opacity: 0.6;
+}
