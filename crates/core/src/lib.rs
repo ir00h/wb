@@ -1,3 +1,5 @@
+pub mod lock;
+
 use std::path::Path;
 
 pub const BOARD_FILE: &str = "board.json";
