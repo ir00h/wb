@@ -489,3 +489,199 @@ fn eight_racers_for_the_lock_of_a_dead_holder_never_hold_it_together() {
         crowded.iter().max().copied().unwrap_or_default()
     );
 }
+
+const STAGGERED_WRITERS: usize = 40;
+const STAGGER: Duration = Duration::from_micros(700);
+const MIXED_ROUNDS: usize = 100;
+
+fn arrive_one_after_another(
+    workspace: &Path,
+    writers: usize,
+    op_of: impl Fn(usize) -> Op,
+) -> Vec<Result<Outcome, Error>> {
+    let arriving: Vec<_> = (0..writers)
+        .map(|number| {
+            let (workspace, op) = (workspace.to_path_buf(), op_of(number));
+            let wait = STAGGER * u32::try_from(number).expect("writer number");
+            thread::spawn(move || {
+                let board = open_board(&workspace, GARDEN);
+                thread::sleep(wait);
+                board.apply(op)
+            })
+        })
+        .collect();
+    arriving
+        .into_iter()
+        .map(|writer| writer.join().expect("writer thread"))
+        .collect()
+}
+
+fn lines_kept(body: &str, numbers: impl Iterator<Item = usize>) -> usize {
+    numbers
+        .filter(|number| body.lines().any(|written| written == line(*number)))
+        .count()
+}
+
+#[test]
+fn forty_writers_arriving_one_after_another_all_land() {
+    let scratch = Scratch::new("append-staggered");
+    let note = add_note(&scratch.garden(), "Harvest log", "").id;
+    let answers = arrive_one_after_another(scratch.path(), STAGGERED_WRITERS, |number| {
+        append(&note, &line(number))
+    });
+    let refused: Vec<_> = answers.iter().filter(|answer| answer.is_err()).collect();
+    assert!(refused.is_empty(), "appends were refused: {refused:?}");
+    let body = open_board(scratch.path(), GARDEN)
+        .note(&note)
+        .expect("note")
+        .body;
+    let kept = lines_kept(&body, 0..STAGGERED_WRITERS);
+    assert_eq!(
+        kept, STAGGERED_WRITERS,
+        "{kept} of {STAGGERED_WRITERS} lines appended by writers arriving one after another are in the note"
+    );
+}
+
+#[test]
+fn appends_racing_title_changes_all_land_in_the_one_file_of_the_note() {
+    let scratch = Scratch::new("rename-append");
+    let note = add_note(&scratch.garden(), "Harvest log", "").id;
+    let folder = scratch.path().join(GARDEN);
+    let answers = arrive_one_after_another(scratch.path(), WRITERS, |number| {
+        if number % 2 == 0 {
+            append(&note, &line(number))
+        } else {
+            set_title(&note, None, &format!("Harvest log {number}"))
+        }
+    });
+    let refused: Vec<_> = answers.iter().filter(|answer| answer.is_err()).collect();
+    assert!(
+        refused.is_empty(),
+        "writers were refused while the note was renamed: {refused:?}"
+    );
+    let holding = files_holding(&folder, &note);
+    let now = open_board(scratch.path(), GARDEN).note(&note);
+    let body = now
+        .as_ref()
+        .map(|note| note.body.clone())
+        .unwrap_or_default();
+    let kept = lines_kept(&body, (0..WRITERS).step_by(2));
+    assert_eq!(
+        (kept, holding.len()),
+        (WRITERS / 2, 1),
+        "{kept} of {} lines appended during title changes are in the note, and {} files hold its id: {holding:?}",
+        WRITERS / 2,
+        holding.len()
+    );
+    assert_eq!(holding, [wb_model::file_name(&now.expect("note"))]);
+}
+
+#[test]
+fn a_title_change_a_body_change_and_an_append_at_once_each_keep_the_others() {
+    let scratch = Scratch::new("mixed");
+    let board = scratch.garden();
+    let folder = scratch.path().join(GARDEN);
+    let mut lost = Vec::new();
+    for round in 0..MIXED_ROUNDS {
+        let note = add_note(&board, &format!("Bed {round}"), "old body");
+        let ops = [
+            set_title(&note.id, Some(&note.title), &format!("Raised bed {round}")),
+            set_body(&note.id, Some("old body"), "new body"),
+            append(&note.id, &line(round)),
+        ];
+        let start = Arc::new(Barrier::new(ops.len()));
+        let writers: Vec<_> = ops
+            .into_iter()
+            .map(|op| {
+                let (workspace, start) = (scratch.path().to_path_buf(), Arc::clone(&start));
+                thread::spawn(move || {
+                    let board = open_board(&workspace, GARDEN);
+                    start.wait();
+                    board.apply(op)
+                })
+            })
+            .collect();
+        let answers: Vec<_> = writers
+            .into_iter()
+            .map(|writer| writer.join().expect("writer thread"))
+            .collect();
+        let now = board.note(&note.id);
+        let expected_body = match &answers[1] {
+            Ok(Outcome::Applied { .. }) => format!("new body\n\n{}", line(round)),
+            Ok(Outcome::Conflict { .. }) => format!("old body\n\n{}", line(round)),
+            other => format!("no body, because the body change answered {other:?}"),
+        };
+        let whole = answers.iter().all(Result::is_ok)
+            && now.as_ref().is_ok_and(|now| {
+                now.title == format!("Raised bed {round}")
+                    && now.body == expected_body
+                    && files_holding(&folder, &note.id) == [wb_model::file_name(now)]
+            });
+        if !whole {
+            lost.push(format!(
+                "round {round}: answers {answers:?}, note {:?}, files {:?}",
+                now.map(|now| (now.title, now.body)),
+                files_holding(&folder, &note.id)
+            ));
+        }
+    }
+    assert!(
+        lost.is_empty(),
+        "{} of {MIXED_ROUNDS} rounds of a title change, a body change and an append at once lost a change:\n{}",
+        lost.len(),
+        lost[..lost.len().min(3)].join("\n")
+    );
+}
+
+const HELD_DEADLINE: Duration = Duration::from_millis(300);
+
+fn replace_by_rename(path: &Path, text: &str) {
+    let beside = path.with_extension("written-by-the-holder");
+    fs::write(&beside, text).expect("new file");
+    fs::rename(&beside, path).expect("rename over the old file");
+}
+
+#[test]
+fn a_lock_still_keeps_writers_out_after_its_holder_replaced_and_renamed_the_files() {
+    let scratch = Scratch::new("held-across-replace");
+    let board = scratch.garden();
+    let note = add_note(&board, "Harvest log", "Monday: peas.");
+    board.apply(add_section("Beds")).expect("section");
+    let folder = scratch.path().join(GARDEN);
+    let file = folder.join(files_holding(&folder, &note.id).remove(0));
+    let config = folder.join(CONFIG_FILE);
+
+    let held = BoardLocks::of_board(&folder)
+        .acquire(
+            &[LockKey::Config, LockKey::Note(note.id.clone())],
+            LONG_DEADLINE,
+        )
+        .expect("holder lock");
+    let note_text = fs::read_to_string(&file).expect("note file");
+    replace_by_rename(&file, &note_text);
+    fs::rename(
+        &file,
+        folder.join(format!("harvest-log-2027-{}.md", note.id)),
+    )
+    .expect("rename by the holder");
+    let config_text = fs::read_to_string(&config).expect("config");
+    replace_by_rename(&config, &config_text);
+
+    let writer = Workspace::open(scratch.path())
+        .expect("workspace")
+        .with_lock_deadline(HELD_DEADLINE)
+        .board(&GARDEN.parse().expect("board id"))
+        .expect("board");
+    let note_answer = writer.apply(append(&note.id, "Tuesday: kale."));
+    let config_answer = writer.apply(add_section("Paths"));
+    drop(held);
+
+    assert!(
+        matches!(note_answer, Err(Error::Busy { .. })),
+        "a writer got into a note whose lock was held, after the holder replaced and renamed its file: {note_answer:?}"
+    );
+    assert!(
+        matches!(config_answer, Err(Error::Busy { .. })),
+        "a writer got into the config whose lock was held, after the holder replaced the file: {config_answer:?}"
+    );
+}
