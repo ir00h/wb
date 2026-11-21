@@ -390,3 +390,24 @@ fn the_notes_of_a_board_are_listed_whole_with_their_files_in_the_order_of_a_snap
         ]
     );
 }
+
+#[test]
+fn an_edit_of_an_id_no_file_holds_leaves_nothing_behind() {
+    let scratch = Scratch::new("unknown-id");
+    let board = scratch.garden();
+    let before = tree_bytes(scratch.path());
+    let unknown = NoteId::parse("n99").expect("id");
+    assert_eq!(
+        board.apply(common::append(&unknown, "Nobody reads this.")),
+        Err(Error::NoteNotFound {
+            note: unknown.clone()
+        })
+    );
+    let after = tree_bytes(scratch.path());
+    assert_eq!(
+        after.keys().collect::<Vec<_>>(),
+        before.keys().collect::<Vec<_>>(),
+        "the edit of an unknown id left files behind"
+    );
+    assert!(!scratch.path().join("garden/.locks").exists());
+}

@@ -230,6 +230,7 @@ impl Board {
     }
 
     fn edit_note(&self, id: &NoteId, edit: &NoteEdit) -> Result<Outcome, Error> {
+        self.find(id)?;
         let held = self.lock(&LockKey::Note(id.clone()), &format!("the note `{id}`"))?;
         let sections = self.sections()?;
         for _ in 0..config::ATTEMPTS {
