@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use serde_json::Value;
@@ -9,55 +9,91 @@ use crate::purity::{self, SourceFile};
 
 struct Layer {
     package: &'static str,
-    workspace: &'static [&'static str],
-    forbidden: &'static [&'static str],
-    fix: &'static str,
+    role: &'static str,
     pure: bool,
+    normal: &'static [&'static str],
+    build: &'static [&'static str],
+    dev: &'static [&'static str],
 }
 
 const LAYERS: &[Layer] = &[
     Layer {
         package: "wb-model",
-        workspace: &[],
-        forbidden: &["tauri", "clap", "notify", "tokio"],
-        fix: "keep wb-model pure: move the dependency into wb-core or a binary",
+        role: "pure shapes and rules",
         pure: true,
+        normal: &["serde", "thiserror", "ts-rs"],
+        build: &[],
+        dev: &["serde_json"],
     },
     Layer {
         package: "wb-core",
-        workspace: &["wb-model"],
-        forbidden: &["tauri", "clap"],
-        fix: "move command-line and window code into wb or whiteboard",
+        role: "boards on disk",
         pure: false,
+        normal: &["wb-model"],
+        build: &[],
+        dev: &[],
     },
     Layer {
         package: "wb",
-        workspace: &["wb-core", "wb-model"],
-        forbidden: &["tauri"],
-        fix: "move window code into whiteboard",
+        role: "the command-line tool",
         pure: false,
+        normal: &["clap", "wb-core", "wb-model"],
+        build: &[],
+        dev: &[],
     },
     Layer {
         package: "whiteboard",
-        workspace: &["wb-core", "wb-model"],
-        forbidden: &[],
-        fix: "move shared code into wb-core or wb-model",
+        role: "the desktop shell",
         pure: false,
+        normal: &["tauri", "wb-core", "wb-model"],
+        build: &["tauri-build"],
+        dev: &[],
     },
     Layer {
         package: "xtask",
-        workspace: &["wb-model"],
-        forbidden: &[],
-        fix: "xtask reads wb-model for the bindings and nothing else",
+        role: "the check command and the bindings generator",
         pure: false,
+        normal: &[
+            "oxc_allocator",
+            "oxc_parser",
+            "oxc_span",
+            "proc-macro2",
+            "ra-ap-rustc_lexer",
+            "serde_json",
+            "toml",
+            "ts-rs",
+            "wb-model",
+        ],
+        build: &[],
+        dev: &[],
     },
 ];
 
-#[derive(Default)]
-struct Graph {
-    workspace: BTreeSet<String>,
-    edges: BTreeMap<String, Vec<Edge>>,
-    packages: BTreeMap<String, Package>,
+const ROOT_MANIFEST: &str = "Cargo.toml";
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Kind {
+    Normal,
+    Build,
+    Dev,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Normal => "normal",
+            Kind::Build => "build",
+            Kind::Dev => "dev",
+        }
+    }
+
+    fn allowed(self, layer: &Layer) -> &'static [&'static str] {
+        match self {
+            Kind::Normal => layer.normal,
+            Kind::Build => layer.build,
+            Kind::Dev => layer.dev,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -65,11 +101,7 @@ struct Package {
     manifest: String,
     library_root: Option<String>,
     build_script: Option<String>,
-}
-
-struct Edge {
-    to: String,
-    dev_only: bool,
+    dependencies: Vec<(String, Kind)>,
 }
 
 pub fn check(root: &Path) -> Result<(), String> {
@@ -77,15 +109,66 @@ pub fn check(root: &Path) -> Result<(), String> {
         root,
         &["cargo", "metadata", "--locked", "--format-version", "1"],
     )?;
-    let graph = parse_metadata(&metadata, root)?;
-    let mut findings = graph_findings(&graph);
+    let packages = parse_metadata(&metadata, root)?;
     let tracked = finding::tracked_files(root)?;
+    let mut findings = table_findings(&packages);
+    findings.extend(nested_workspaces(root, &tracked));
     for layer in LAYERS.iter().filter(|layer| layer.pure) {
-        if let Some(package) = graph.packages.get(layer.package) {
+        if let Some(package) = packages.get(layer.package) {
             findings.extend(purity_findings(root, package, &tracked));
         }
     }
     finding::report(&findings)
+}
+
+fn table_findings(packages: &BTreeMap<String, Package>) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (name, package) in packages {
+        let Some(layer) = LAYERS.iter().find(|layer| layer.package == name) else {
+            findings.push(Finding::whole(
+                &package.manifest,
+                format!(
+                    "package {name} is missing from the layer table; add it to LAYERS in crates/xtask/src/layers.rs with the dependencies it may use"
+                ),
+            ));
+            continue;
+        };
+        for (dependency, kind) in &package.dependencies {
+            if !kind.allowed(layer).contains(&dependency.as_str()) {
+                findings.push(Finding::whole(
+                    &package.manifest,
+                    format!(
+                        "{name} ({}) depends directly on {dependency} as a {} dependency; add it to the table in `layers.rs` if the layer may use it",
+                        layer.role,
+                        kind.name()
+                    ),
+                ));
+            }
+        }
+    }
+    findings
+}
+
+fn nested_workspaces(root: &Path, tracked: &[String]) -> Vec<Finding> {
+    tracked
+        .iter()
+        .filter(|path| path.as_str() != ROOT_MANIFEST && path.ends_with("/Cargo.toml"))
+        .filter_map(|path| {
+            let text = std::fs::read_to_string(root.join(path)).ok()?;
+            declares_workspace(&text).then(|| {
+                Finding::whole(
+                    path,
+                    "declares its own workspace, so the layer table does not cover it; make it a member of the repository workspace",
+                )
+            })
+        })
+        .collect()
+}
+
+fn declares_workspace(manifest: &str) -> bool {
+    manifest
+        .parse::<toml::Table>()
+        .is_ok_and(|table| table.contains_key("workspace"))
 }
 
 fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Finding> {
@@ -103,7 +186,7 @@ fn purity_findings(root: &Path, package: &Package, tracked: &[String]) -> Vec<Fi
         ));
         return findings;
     };
-    let folder = package.manifest.trim_end_matches("Cargo.toml");
+    let folder = package.manifest.trim_end_matches(ROOT_MANIFEST);
     let test_folder = format!("{folder}tests/");
     let sources: Vec<(String, String)> = tracked
         .iter()
@@ -134,6 +217,14 @@ fn relative(root: &Path, path: Option<&str>) -> Option<String> {
     )
 }
 
+fn kind_of(dependency: &Value) -> Kind {
+    match dependency["kind"].as_str() {
+        Some("build") => Kind::Build,
+        Some("dev") => Kind::Dev,
+        _ => Kind::Normal,
+    }
+}
+
 fn package_facts(package: &Value, root: &Path) -> Package {
     let targets = package["targets"].as_array().map_or(&[][..], Vec::as_slice);
     let source_of = |kind: &str| {
@@ -146,225 +237,145 @@ fn package_facts(package: &Value, root: &Path) -> Package {
             })
             .and_then(|target| relative(root, target["src_path"].as_str()))
     };
+    let mut dependencies: Vec<(String, Kind)> = package["dependencies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|dependency| {
+            Some((dependency["name"].as_str()?.to_owned(), kind_of(dependency)))
+        })
+        .collect();
+    dependencies.sort_by(|a, b| a.0.cmp(&b.0));
     Package {
         manifest: relative(root, package["manifest_path"].as_str()).unwrap_or_default(),
         library_root: source_of("lib"),
         build_script: source_of("custom-build"),
+        dependencies,
     }
 }
 
-fn parse_metadata(json: &str, root: &Path) -> Result<Graph, String> {
+fn parse_metadata(json: &str, root: &Path) -> Result<BTreeMap<String, Package>, String> {
     let metadata: Value =
         serde_json::from_str(json).map_err(|error| format!("cargo metadata: {error}"))?;
-    let names: BTreeMap<&str, &str> = metadata["packages"]
+    let members: Vec<&str> = metadata["workspace_members"]
         .as_array()
         .into_iter()
         .flatten()
-        .filter_map(|package| Some((package["id"].as_str()?, package["name"].as_str()?)))
+        .filter_map(Value::as_str)
         .collect();
-    let name_of = |id: &Value| {
-        id.as_str()
-            .and_then(|id| names.get(id))
-            .map(|name| (*name).to_owned())
-    };
-    let mut graph = Graph {
-        workspace: metadata["workspace_members"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(name_of)
-            .collect(),
-        ..Graph::default()
-    };
-    for package in metadata["packages"].as_array().into_iter().flatten() {
-        if let Some(name) = name_of(&package["id"]).filter(|name| graph.workspace.contains(name)) {
-            graph.packages.insert(name, package_facts(package, root));
-        }
-    }
-    for node in metadata["resolve"]["nodes"]
+    Ok(metadata["packages"]
         .as_array()
         .into_iter()
         .flatten()
-    {
-        let Some(from) = name_of(&node["id"]) else {
-            continue;
-        };
-        let edges = node["deps"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|dependency| {
-                let to = name_of(&dependency["pkg"])?;
-                let dev_only = dependency["dep_kinds"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .all(|kind| kind["kind"].as_str() == Some("dev"));
-                Some(Edge { to, dev_only })
-            })
-            .collect();
-        graph.edges.insert(from, edges);
-    }
-    Ok(graph)
-}
-
-fn path_to(graph: &Graph, from: &str, target: &str) -> Option<Vec<String>> {
-    let mut came_from: BTreeMap<&str, &str> = BTreeMap::new();
-    let mut queue = VecDeque::from([from]);
-    while let Some(current) = queue.pop_front() {
-        if current == target {
-            let mut path = vec![current.to_owned()];
-            let mut step = current;
-            while let Some(previous) = came_from.get(step) {
-                path.push((*previous).to_owned());
-                step = previous;
-            }
-            path.reverse();
-            return Some(path);
-        }
-        for edge in graph.edges.get(current).into_iter().flatten() {
-            if !edge.dev_only && edge.to != from && !came_from.contains_key(edge.to.as_str()) {
-                came_from.insert(&edge.to, current);
-                queue.push_back(&edge.to);
-            }
-        }
-    }
-    None
-}
-
-fn graph_findings(graph: &Graph) -> Vec<Finding> {
-    let mut findings = Vec::new();
-    let manifest = |package: &str| format!("package {package}");
-    for package in &graph.workspace {
-        let Some(layer) = LAYERS.iter().find(|layer| layer.package == package) else {
-            findings.push(Finding::new(
-                &manifest(package),
-                1,
-                "is missing from the layer table; add it to LAYERS in crates/xtask/src/layers.rs with its allowed dependencies",
-            ));
-            continue;
-        };
-        for edge in graph.edges.get(package).into_iter().flatten() {
-            if graph.workspace.contains(&edge.to) && !layer.workspace.contains(&edge.to.as_str()) {
-                findings.push(Finding::new(
-                    &manifest(package),
-                    1,
-                    format!(
-                        "depends on {}, which the layer table forbids; {}",
-                        edge.to, layer.fix
-                    ),
-                ));
-            }
-        }
-        for forbidden in layer.forbidden {
-            if let Some(path) = path_to(graph, package, forbidden) {
-                findings.push(Finding::new(
-                    &manifest(package),
-                    1,
-                    format!(
-                        "depends on {forbidden} through {}, which the layer table forbids; {}",
-                        path.join(" -> "),
-                        layer.fix
-                    ),
-                ));
-            }
-        }
-    }
-    findings
+        .filter(|package| {
+            package["id"]
+                .as_str()
+                .is_some_and(|id| members.contains(&id))
+        })
+        .filter_map(|package| {
+            Some((
+                package["name"].as_str()?.to_owned(),
+                package_facts(package, root),
+            ))
+        })
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Edge, Graph, graph_findings};
+    use std::collections::BTreeMap;
 
-    fn graph(workspace: &[&str], edges: &[(&str, &str, bool)]) -> Graph {
-        let mut graph = Graph {
-            workspace: workspace.iter().map(|name| (*name).to_owned()).collect(),
-            ..Graph::default()
-        };
-        for (from, to, dev_only) in edges {
-            graph
-                .edges
-                .entry((*from).to_owned())
-                .or_default()
-                .push(Edge {
-                    to: (*to).to_owned(),
-                    dev_only: *dev_only,
-                });
-        }
-        graph
+    use super::{Kind, Package, declares_workspace, table_findings};
+
+    fn packages(entries: &[(&str, &[(&str, Kind)])]) -> BTreeMap<String, Package> {
+        entries
+            .iter()
+            .map(|(name, dependencies)| {
+                (
+                    (*name).to_owned(),
+                    Package {
+                        manifest: format!("crates/{name}/Cargo.toml"),
+                        dependencies: dependencies
+                            .iter()
+                            .map(|(dependency, kind)| ((*dependency).to_owned(), *kind))
+                            .collect(),
+                        ..Package::default()
+                    },
+                )
+            })
+            .collect()
     }
 
-    fn messages(graph: &Graph) -> Vec<String> {
-        graph_findings(graph)
+    fn messages(packages: &BTreeMap<String, Package>) -> Vec<String> {
+        table_findings(packages)
             .into_iter()
             .map(|finding| finding.to_string())
             .collect()
     }
 
-    const MEMBERS: [&str; 5] = ["wb-model", "wb-core", "wb", "whiteboard", "xtask"];
-
     #[test]
-    fn the_intended_graph_passes() {
-        let intended = graph(
-            &MEMBERS,
-            &[
-                ("wb-core", "wb-model", false),
-                ("wb", "wb-core", false),
-                ("wb", "wb-model", false),
-                ("wb", "clap", false),
-                ("whiteboard", "wb-core", false),
-                ("whiteboard", "tauri", false),
-                ("xtask", "wb-model", false),
-                ("wb-model", "serde", false),
-            ],
-        );
+    fn the_intended_dependencies_pass() {
+        let intended = packages(&[
+            (
+                "wb-model",
+                &[
+                    ("serde", Kind::Normal),
+                    ("ts-rs", Kind::Normal),
+                    ("serde_json", Kind::Dev),
+                ],
+            ),
+            ("wb-core", &[("wb-model", Kind::Normal)]),
+            (
+                "whiteboard",
+                &[("tauri", Kind::Normal), ("tauri-build", Kind::Build)],
+            ),
+        ]);
         assert_eq!(messages(&intended), Vec::<String>::new());
     }
 
     #[test]
-    fn a_forbidden_workspace_edge_is_named_with_its_fix() {
-        let inverted = graph(
-            &MEMBERS,
-            &[
-                ("wb-core", "wb-model", false),
-                ("wb-model", "wb-core", true),
-            ],
-        );
+    fn a_dependency_outside_the_table_is_named_without_a_position() {
+        let found = packages(&[
+            (
+                "wb-model",
+                &[("serde_json", Kind::Normal), ("wb-core", Kind::Dev)],
+            ),
+            (
+                "wb-core",
+                &[("clap_builder", Kind::Normal), ("clap", Kind::Dev)],
+            ),
+            ("wb", &[("tauri-utils", Kind::Normal)]),
+        ]);
         assert_eq!(
-            messages(&inverted),
+            messages(&found),
             vec![
-                "package wb-model:1: depends on wb-core, which the layer table forbids; keep wb-model pure: move the dependency into wb-core or a binary"
+                "crates/wb/Cargo.toml: wb (the command-line tool) depends directly on tauri-utils as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
+                "crates/wb-core/Cargo.toml: wb-core (boards on disk) depends directly on clap_builder as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
+                "crates/wb-core/Cargo.toml: wb-core (boards on disk) depends directly on clap as a dev dependency; add it to the table in `layers.rs` if the layer may use it",
+                "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on serde_json as a normal dependency; add it to the table in `layers.rs` if the layer may use it",
+                "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on wb-core as a dev dependency; add it to the table in `layers.rs` if the layer may use it",
             ]
         );
-    }
-
-    #[test]
-    fn a_forbidden_crate_is_found_through_other_crates() {
-        let indirect = graph(
-            &MEMBERS,
-            &[("wb-core", "watcher", false), ("watcher", "clap", false)],
-        );
-        assert_eq!(
-            messages(&indirect),
-            vec![
-                "package wb-core:1: depends on clap through wb-core -> watcher -> clap, which the layer table forbids; move command-line and window code into wb or whiteboard"
-            ]
-        );
-    }
-
-    #[test]
-    fn a_forbidden_crate_used_only_by_tests_is_allowed() {
-        let dev = graph(&MEMBERS, &[("wb-model", "tokio", true)]);
-        assert_eq!(messages(&dev), Vec::<String>::new());
     }
 
     #[test]
     fn a_package_missing_from_the_table_fails() {
-        let extra = graph(&["wb-model", "wb-sync"], &[]);
-        assert_eq!(messages(&extra).len(), 1);
-        assert!(
-            messages(&extra)[0].starts_with("package wb-sync:1: is missing from the layer table")
+        assert_eq!(
+            messages(&packages(&[("wb-sync", &[])])),
+            vec![
+                "crates/wb-sync/Cargo.toml: package wb-sync is missing from the layer table; add it to LAYERS in crates/xtask/src/layers.rs with the dependencies it may use"
+            ]
         );
+    }
+
+    #[test]
+    fn a_manifest_with_its_own_workspace_is_found() {
+        assert!(declares_workspace(
+            "[package]\nname = \"helper\"\n\n[workspace]\n"
+        ));
+        assert!(declares_workspace("workspace = { members = [] }\n"));
+        assert!(!declares_workspace(
+            "[package]\nname = \"wb\"\nversion.workspace = true\n\n[dependencies]\nclap.workspace = true\n"
+        ));
     }
 }

@@ -21,6 +21,7 @@ thiserror = { version = "2", default-features = false }
 ts-rs = { version = "12.0", features = ["no-serde-warnings"] }
 ra-ap-rustc_lexer = "0.185"
 proc-macro2 = { version = "1", features = ["span-locations"] }
+toml = "1"
 oxc_allocator = "0.110"
 oxc_parser = "0.110"
 oxc_span = "0.110"
