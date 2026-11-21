@@ -112,6 +112,16 @@ fn rust_commands() -> Vec<Vec<&'static str>> {
         "warnings",
     ]);
     commands.push(vec!["cargo", "test", "--workspace", "--locked", "--quiet"]);
+    commands.push(vec![
+        "cargo",
+        "test",
+        "--package",
+        "whiteboard",
+        "--features",
+        "automation",
+        "--locked",
+        "--quiet",
+    ]);
     commands
 }
 

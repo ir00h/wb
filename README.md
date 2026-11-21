@@ -46,9 +46,9 @@ With the feature on, setting `WB_AUTOMATION_PORT` makes the shell listen on `127
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /evaluate` | runs the request body as the body of an async function in the web view and returns its value as JSON; status 422 with the error when it throws |
 | `GET /snapshot`  | returns a PNG of the web view                                                                                                                  |
-| `GET /window`    | returns the title, size, scale, window number and whether background mode is on                                                                |
+| `GET /window`    | returns the title, size, scale, window number, whether the window is visible and whether background mode is on                                 |
 | `POST /quit`     | quits the app                                                                                                                                  |
 
-`WB_AUTOMATION_BACKGROUND=1` keeps the app from ever becoming the frontmost app and keeps the page rendering while the window is hidden behind others (macOS). Journeys run in background mode; `WB_E2E_FOREGROUND=1` turns it off, as continuous integration does. `shell-default-clean` fails when the default shell binary contains any part of the channel.
+`WB_AUTOMATION_BACKGROUND=1` keeps the app from ever becoming the frontmost app and keeps the page rendering while the window is hidden behind others (macOS only). It needs `WB_AUTOMATION_PORT` too; without it the app refuses to start rather than start in the foreground. When the system's web view cannot keep a hidden window rendering, the app says why and exits instead of announcing the channel. With the channel on, the app exits by itself when the program that started it ends. Journeys run in background mode; `WB_E2E_FOREGROUND=1` turns it off, as continuous integration does. `shell-default-clean` fails when the default shell binary contains any part of the channel.
 
 Code carries no comments. Say it in code: a name, a type, a test.

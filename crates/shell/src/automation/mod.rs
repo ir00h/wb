@@ -2,13 +2,15 @@
 mod macos;
 
 use std::collections::HashMap;
+#[cfg(unix)]
+use std::io::Write;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
 use serde::Deserialize;
-use tauri::webview::{PageLoadEvent, PlatformWebview};
+use tauri::webview::PageLoadEvent;
 use tauri::{App, Builder, Manager, State, WebviewWindow, WebviewWindowBuilder, Wry};
 use tiny_http::{Header, Method, Request, Response, Server};
 
@@ -17,8 +19,9 @@ const BACKGROUND_VARIABLE: &str = "WB_AUTOMATION_BACKGROUND";
 const LISTENING_ANNOUNCEMENT: &str = "AUTOMATION_LISTENING";
 const SETTLE_COMMAND: &str = "settle_evaluation";
 const EVALUATION_TIMEOUT: Duration = Duration::from_secs(10);
-const NATIVE_TIMEOUT: Duration = Duration::from_secs(10);
 const ROUTES: &str = "POST /evaluate, GET /snapshot, GET /window, POST /quit";
+#[cfg(unix)]
+const LAUNCHER_POLL: Duration = Duration::from_millis(200);
 
 #[derive(Clone)]
 pub struct Automation {
@@ -30,25 +33,61 @@ struct Channel {
     server: Mutex<Option<Server>>,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct Settings {
+    port: u16,
+    background: bool,
+}
+
+fn settings(port: Option<&str>, background: Option<&str>) -> Result<Option<Settings>, String> {
+    let background = match background {
+        None | Some("0") => false,
+        Some("1") => true,
+        Some(other) => {
+            return Err(format!(
+                "{BACKGROUND_VARIABLE} must be 1 or 0, not `{other}`"
+            ));
+        }
+    };
+    let Some(port) = port else {
+        if background {
+            return Err(format!(
+                "{BACKGROUND_VARIABLE}=1 needs {PORT_VARIABLE} too, and the app does not start in the foreground instead"
+            ));
+        }
+        return Ok(None);
+    };
+    let port = port.parse().map_err(|_| {
+        format!("{PORT_VARIABLE} must be a port number from 0 to 65535, not `{port}`")
+    })?;
+    Ok(Some(Settings { port, background }))
+}
+
+fn variable(name: &str) -> Result<Option<String>, String> {
+    match std::env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => Err(format!("{name} is not valid Unicode")),
+    }
+}
+
 impl Automation {
     pub fn from_env() -> Result<Automation, String> {
-        let Ok(port) = std::env::var(PORT_VARIABLE) else {
+        let port = variable(PORT_VARIABLE)?;
+        let background = variable(BACKGROUND_VARIABLE)?;
+        let Some(Settings { port, background }) = settings(port.as_deref(), background.as_deref())?
+        else {
             return Ok(Automation { channel: None });
         };
-        let port: u16 = port.parse().map_err(|_| {
-            format!("{PORT_VARIABLE} must be a port number from 0 to 65535, not `{port}`")
-        })?;
-        let background = match std::env::var(BACKGROUND_VARIABLE).as_deref() {
-            Err(_) | Ok("0") => false,
-            Ok("1") => true,
-            Ok(other) => {
-                return Err(format!(
-                    "{BACKGROUND_VARIABLE} must be 1 or 0, not `{other}`"
-                ));
-            }
-        };
+        if background && !cfg!(target_os = "macos") {
+            return Err(format!(
+                "{BACKGROUND_VARIABLE}=1 works only on macOS; leave it unset on this system"
+            ));
+        }
         let server = Server::http((Ipv4Addr::LOCALHOST, port))
             .map_err(|error| format!("the automation channel cannot listen: {error}"))?;
+        #[cfg(unix)]
+        exit_with_launcher();
         Ok(Automation {
             channel: Some(Arc::new(Channel {
                 background,
@@ -65,13 +104,11 @@ impl Automation {
 
     pub fn prepare_builder(&self, builder: Builder<Wry>) -> Builder<Wry> {
         let builder = builder.manage(Evaluations::default());
-        #[cfg(target_os = "macos")]
-        let builder = if self.background() {
-            builder.activate_ignoring_other_apps(false)
+        if self.background() {
+            never_activate(builder)
         } else {
             builder
-        };
-        builder
+        }
     }
 
     pub fn prepare_window<'a>(
@@ -91,17 +128,45 @@ impl Automation {
             })
     }
 
-    pub fn prepare_app(&self, app: App) -> App {
-        #[cfg(target_os = "macos")]
-        let app = {
-            let mut app = app;
-            if self.background() {
-                app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            }
-            app
-        };
+    pub fn prepare_app(&self, mut app: App) -> App {
+        if self.background() {
+            stay_out_of_the_dock(&mut app);
+        }
         app
     }
+}
+
+#[cfg(target_os = "macos")]
+fn never_activate(builder: Builder<Wry>) -> Builder<Wry> {
+    builder.activate_ignoring_other_apps(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn never_activate(builder: Builder<Wry>) -> Builder<Wry> {
+    builder
+}
+
+#[cfg(target_os = "macos")]
+fn stay_out_of_the_dock(app: &mut App) {
+    app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn stay_out_of_the_dock(_app: &mut App) {}
+
+#[cfg(unix)]
+fn exit_with_launcher() {
+    let launcher = std::os::unix::process::parent_id();
+    std::thread::spawn(move || {
+        while std::os::unix::process::parent_id() == launcher {
+            std::thread::sleep(LAUNCHER_POLL);
+        }
+        let _ = writeln!(
+            std::io::stderr(),
+            "Whiteboard exits because the program that started its automation channel has ended"
+        );
+        std::process::exit(1);
+    });
 }
 
 impl Channel {
@@ -114,18 +179,38 @@ impl Channel {
         else {
             return;
         };
-        #[cfg(target_os = "macos")]
-        if self.background {
-            let _ = window.with_webview(|webview| macos::keep_rendering_when_hidden(&webview));
-        }
-        let address = server
-            .server_addr()
-            .to_ip()
-            .map_or_else(String::new, |address| address.to_string());
-        println!("{LISTENING_ANNOUNCEMENT} {address}");
         let background = self.background;
-        std::thread::spawn(move || serve(&server, &window, background));
+        #[cfg(target_os = "macos")]
+        if background {
+            let listening_window = window.clone();
+            let keep_rendering = move |webview| match macos::keep_rendering_when_hidden(&webview) {
+                Ok(()) => listen(server, listening_window, background),
+                Err(reason) => refuse_background(&reason),
+            };
+            if let Err(error) = window.with_webview(keep_rendering) {
+                refuse_background(&format!("the web view cannot be reached: {error}"));
+            }
+            return;
+        }
+        listen(server, window, background);
     }
+}
+
+#[cfg(target_os = "macos")]
+fn refuse_background(reason: &str) -> ! {
+    eprintln!(
+        "Whiteboard could not start: background mode cannot keep the hidden window rendering, because {reason}."
+    );
+    std::process::exit(1);
+}
+
+fn listen(server: Server, window: WebviewWindow, background: bool) {
+    let address = server
+        .server_addr()
+        .to_ip()
+        .map_or_else(String::new, |address| address.to_string());
+    println!("{LISTENING_ANNOUNCEMENT} {address}");
+    std::thread::spawn(move || serve(&server, &window, background));
 }
 
 #[derive(Default)]
@@ -156,6 +241,7 @@ pub fn settle_evaluation(evaluations: State<'_, Evaluations>, id: u64, settled: 
 
 enum Reply {
     Json(String),
+    #[cfg(target_os = "macos")]
     Png(Vec<u8>),
     Threw(String),
     Failed(String),
@@ -167,6 +253,7 @@ impl Reply {
     fn into_response(self) -> Response<std::io::Cursor<Vec<u8>>> {
         let (status, content_type, body) = match self {
             Reply::Json(json) => (200, "application/json", json.into_bytes()),
+            #[cfg(target_os = "macos")]
             Reply::Png(png) => (200, "image/png", png),
             Reply::Threw(error) => (422, "text/plain", error.into_bytes()),
             Reply::Failed(error) => (500, "text/plain", error.into_bytes()),
@@ -304,10 +391,12 @@ fn evaluate(window: &WebviewWindow, body: &str) -> Reply {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn on_main_thread<T: Send + 'static>(
     window: &WebviewWindow,
-    work: impl FnOnce(&PlatformWebview, mpsc::Sender<T>) + Send + 'static,
+    work: impl FnOnce(&tauri::webview::PlatformWebview, mpsc::Sender<T>) + Send + 'static,
 ) -> Result<T, String> {
+    const NATIVE_TIMEOUT: Duration = Duration::from_secs(10);
     let (reply, replied) = mpsc::channel();
     window
         .with_webview(move |webview| work(&webview, reply))
@@ -331,16 +420,10 @@ fn snapshot(_window: &WebviewWindow) -> Reply {
 }
 
 #[cfg(target_os = "macos")]
-fn window_number(window: &WebviewWindow) -> Result<Option<isize>, String> {
+fn window_number(window: &WebviewWindow) -> Result<isize, String> {
     on_main_thread(window, |webview, reply| {
         let _ = reply.send(macos::window_number(webview));
-    })
-    .map(Some)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn window_number(_window: &WebviewWindow) -> Result<Option<isize>, String> {
-    Ok(None)
+    })?
 }
 
 fn window_facts(window: &WebviewWindow, background: bool) -> Reply {
@@ -351,12 +434,18 @@ fn window_facts(window: &WebviewWindow, background: bool) -> Reply {
             .map_err(|error| error.to_string())?
             .to_logical::<f64>(scale);
         let title = window.title().map_err(|error| error.to_string())?;
+        let visible = window.is_visible().map_err(|error| error.to_string())?;
+        #[cfg(target_os = "macos")]
+        let window_number = Some(window_number(window)?);
+        #[cfg(not(target_os = "macos"))]
+        let window_number: Option<isize> = None;
         let facts = serde_json::json!({
             "title": title,
             "width": size.width,
             "height": size.height,
             "scale": scale,
-            "windowNumber": window_number(window)?,
+            "visible": visible,
+            "windowNumber": window_number,
             "background": background,
         });
         Ok(facts.to_string())
@@ -364,5 +453,47 @@ fn window_facts(window: &WebviewWindow, background: bool) -> Reply {
     match facts() {
         Ok(json) => Reply::Json(json),
         Err(error) => Reply::Failed(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Settings, settings};
+
+    #[test]
+    fn the_channel_is_off_without_a_port() {
+        assert_eq!(settings(None, None), Ok(None));
+        assert_eq!(settings(None, Some("0")), Ok(None));
+    }
+
+    #[test]
+    fn background_mode_without_a_port_is_refused() {
+        let refused = settings(None, Some("1")).expect_err("background mode needs a port");
+        assert!(refused.contains("WB_AUTOMATION_PORT"), "{refused}");
+    }
+
+    #[test]
+    fn a_port_turns_the_channel_on_in_the_mode_asked_for() {
+        assert_eq!(
+            settings(Some("0"), Some("1")),
+            Ok(Some(Settings {
+                port: 0,
+                background: true
+            }))
+        );
+        assert_eq!(
+            settings(Some("4870"), None),
+            Ok(Some(Settings {
+                port: 4870,
+                background: false
+            }))
+        );
+    }
+
+    #[test]
+    fn values_that_are_not_understood_are_refused() {
+        assert!(settings(Some("http"), None).is_err());
+        assert!(settings(Some("0"), Some("yes")).is_err());
+        assert!(settings(None, Some("yes")).is_err());
     }
 }
