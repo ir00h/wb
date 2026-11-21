@@ -7,7 +7,24 @@ use syn::{Attribute, Expr, Ident, Lit, Meta, MetaList, Path, Token, Type};
 
 use crate::finding::Finding;
 
-pub const NEVER_CROSSES: &[(&str, &str)] = &[];
+pub const NEVER_CROSSES: &[(&str, &str)] = &[
+    (
+        "BoardConfig",
+        "the board config file stays on disk; the window sees its sections as SectionNode",
+    ),
+    (
+        "TagColour",
+        "a tag entry of the board config file, which stays on disk",
+    ),
+    (
+        "SectionEntry",
+        "a section entry of the board config file; the window sees sections as SectionNode",
+    ),
+    (
+        "BoardFile",
+        "the board file stays on disk and is never sent to the window",
+    ),
+];
 const EXPORT_LIST: &str = "export_every_type in crates/xtask/src/bindings.rs";
 
 #[derive(Default)]
