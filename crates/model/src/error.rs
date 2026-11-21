@@ -50,6 +50,4 @@ pub enum Invalid {
     SectionNameTaken { name: String },
     #[error("a board needs a name")]
     EmptyBoardName,
-    #[error("a note needs a title or a body")]
-    EmptyNote,
 }
