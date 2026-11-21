@@ -324,34 +324,97 @@ fn follows_space(bytes: &[u8], index: usize) -> bool {
 }
 
 fn yaml_comments(text: &str) -> Vec<usize> {
-    let bytes = text.as_bytes();
     let mut offsets = Vec::new();
-    let mut quote: Option<u8> = None;
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        match quote {
-            Some(b'"') if byte == b'\\' => index += 1,
-            Some(b'\'') if bytes[index..].starts_with(b"''") => index += 1,
-            Some(open) if byte == open => quote = None,
-            None if (byte == b'"' || byte == b'\'')
-                && (follows_space(bytes, index) || b"[{,".contains(&bytes[index - 1])) =>
-            {
-                quote = Some(byte);
-            }
-            None if byte == b'#' && follows_space(bytes, index) => {
-                offsets.push(index);
-                index += bytes[index..]
-                    .iter()
-                    .position(|&next| next == b'\n')
-                    .unwrap_or(bytes.len() - index);
+    let mut block_parent: Option<usize> = None;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let content = line.trim_end_matches(['\n', '\r']);
+        let indent = content.len() - content.trim_start_matches(' ').len();
+        if let Some(parent) = block_parent {
+            if content.trim().is_empty() || indent > parent {
+                offsets.extend(shell_comments(content).into_iter().map(|at| offset + at));
+                offset += line.len();
                 continue;
             }
+            block_parent = None;
+        }
+        let (comment, opens_block) = yaml_line(content.as_bytes());
+        offsets.extend(comment.map(|at| offset + at));
+        if opens_block {
+            block_parent = Some(indent);
+        }
+        offset += line.len();
+    }
+    offsets
+}
+
+fn closing_quote(bytes: &[u8], open: usize) -> Option<usize> {
+    let quote = bytes[open];
+    let mut index = open + 1;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\\' if quote == b'"' => index += 1,
+            b'\'' if quote == b'\'' && bytes.get(index + 1) == Some(&b'\'') => index += 1,
+            byte if byte == quote => return Some(index),
             _ => {}
         }
         index += 1;
     }
-    offsets
+    None
+}
+
+fn yaml_line(bytes: &[u8]) -> (Option<usize>, bool) {
+    let ends_token = |index: usize| bytes.get(index).is_none_or(u8::is_ascii_whitespace);
+    let mut scalar_starts = true;
+    let mut flow_depth = 0usize;
+    let mut opens_block = false;
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'#' && (index == 0 || bytes[index - 1].is_ascii_whitespace()) {
+            return (Some(index), opens_block);
+        }
+        if scalar_starts {
+            match byte {
+                b' ' | b'\t' => {}
+                b'"' | b'\'' => {
+                    scalar_starts = false;
+                    if let Some(close) = closing_quote(bytes, index) {
+                        index = close;
+                    }
+                }
+                b'|' | b'>' => {
+                    scalar_starts = false;
+                    opens_block = flow_depth == 0;
+                }
+                b'-' | b'?' if ends_token(index + 1) => {}
+                b'[' | b'{' => flow_depth += 1,
+                b'&' | b'!' => {
+                    while index + 1 < bytes.len() && !bytes[index + 1].is_ascii_whitespace() {
+                        index += 1;
+                    }
+                }
+                _ => {
+                    scalar_starts = false;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        match byte {
+            b':' if ends_token(index + 1)
+                || (flow_depth > 0 && matches!(bytes.get(index + 1), Some(b',' | b']' | b'}'))) =>
+            {
+                scalar_starts = true;
+            }
+            b',' if flow_depth > 0 => scalar_starts = true,
+            b']' | b'}' if flow_depth > 0 => flow_depth -= 1,
+            _ => {}
+        }
+        index += 1;
+    }
+    (None, opens_block)
 }
 
 fn shell_comments(text: &str) -> Vec<usize> {
@@ -487,6 +550,36 @@ mod tests {
     fn yaml_hash_inside_quotes_or_words_is_code() {
         let text = "a: \"#000\"\nb: '#fff'\nc: x#y\nd: it's # trailing\n# full line\n";
         assert_eq!(lines("a.yml", text), vec![4, 5]);
+    }
+
+    #[test]
+    fn yaml_quote_opens_only_where_a_scalar_starts() {
+        let text =
+            "- name: Run 'em all # hidden\n  run: cargo xtask check\n# after the apostrophe\n";
+        assert_eq!(lines("a.yml", text), vec![1, 3]);
+    }
+
+    #[test]
+    fn yaml_quoted_and_flow_scalars_hold_hashes() {
+        let text = "- name: \"Colour #fff and 'x # y'\"\n- name: 'It''s # fine'\n  env: { A: \"x # y\", B: 'z # w', C: [ \"p # q\" ] }\n'@scope/pkg@1.0.0':\n  engines: {node: '>=14 # x'}\nkey: &anchor \"a # b\"\n";
+        assert_eq!(lines("a.yml", text), Vec::<usize>::new());
+    }
+
+    #[test]
+    fn yaml_plain_scalar_ends_at_a_spaced_hash() {
+        assert_eq!(lines("a.yml", "run: echo \"a # b\"\n"), vec![1]);
+    }
+
+    #[test]
+    fn yaml_unclosed_quote_is_scanned_as_plain_text() {
+        let text = "a: \"starts here # and goes on\n  ends here\"\n";
+        assert_eq!(lines("a.yml", text), vec![1]);
+    }
+
+    #[test]
+    fn yaml_block_scalar_is_text_checked_with_the_shell_rule() {
+        let text = "steps:\n  - run: | # opener\n      echo \"it's # fine\"\n      # shell comment\n\n      echo 'a#b'\n  - name: next # after\n";
+        assert_eq!(lines("a.yml", text), vec![2, 4, 7]);
     }
 
     #[test]
