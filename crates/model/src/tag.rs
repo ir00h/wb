@@ -7,6 +7,9 @@ use thiserror::Error;
 
 use crate::text;
 
+const PART_SEPARATOR: char = '/';
+const PART_PUNCTUATION: &str = "-_.";
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[error("a tag needs at least one character besides spaces and `#`")]
 pub struct EmptyTag;
@@ -39,6 +42,17 @@ impl Tag {
             }
         }
         tags
+    }
+
+    #[must_use]
+    pub fn is_well_formed(&self) -> bool {
+        self.0.split(PART_SEPARATOR).all(|part| {
+            !part.is_empty()
+                && part.chars().all(|character| {
+                    (character.is_alphanumeric() && !character.is_uppercase())
+                        || PART_PUNCTUATION.contains(character)
+                })
+        })
     }
 
     #[must_use]

@@ -322,3 +322,24 @@ fn a_config_that_is_not_valid_is_reported_and_never_overwritten() {
         "{ \"sections\": ["
     );
 }
+
+#[test]
+fn a_note_with_a_tag_that_is_not_well_formed_is_refused_and_nothing_is_written() {
+    let scratch = Scratch::new("malformed-tag");
+    let board = scratch.garden();
+    let before = tree_bytes(scratch.path());
+    let draft = NoteDraft {
+        title: "Plant list".to_owned(),
+        tags: vec!["vegetable".to_owned(), "Plan!".to_owned()],
+        ..NoteDraft::default()
+    };
+    assert_eq!(
+        board.apply(Op::AddNote { draft }),
+        Err(Error::Invalid {
+            problem: Invalid::MalformedTag {
+                tag: "plan!".to_owned()
+            }
+        })
+    );
+    assert_eq!(tree_bytes(scratch.path()), before);
+}

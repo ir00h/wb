@@ -55,6 +55,10 @@ pub enum Invalid {
     EmptySectionName,
     #[error("a section called `{name}` already exists there; pick another name")]
     SectionNameTaken { name: String },
+    #[error(
+        "the tag `{tag}` is not well formed: a tag is made of lowercase letters, digits, `-`, `_` and `.`, with `/` between its parts"
+    )]
+    MalformedTag { tag: String },
     #[error("a hue is a number from {HUE_MIN} to {HUE_MAX}")]
     HueOutOfRange,
     #[error("a board needs a name")]

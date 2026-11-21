@@ -378,3 +378,24 @@ fn slugs_are_short_ascii_and_dash_separated() {
     assert_eq!(slug("  What's \"this\"?  "), "what-s-this");
     assert!(slug(&"word ".repeat(40)).len() <= 48);
 }
+
+#[test]
+fn a_tag_is_well_formed_when_each_part_is_lowercase_letters_digits_and_three_marks() {
+    for written in [
+        "plan",
+        "area/kitchen",
+        "v1.2",
+        "open-question",
+        "to_do",
+        "größe",
+        "a/b/c",
+    ] {
+        let tag = Tag::new(written).expect("tag");
+        assert!(tag.is_well_formed(), "`{tag}` was refused");
+    }
+    for written in ["plan!", "a//b", "/a", "a/", "what?", "50%", "a,b", "(x)"] {
+        let tag = Tag::new(written).expect("tag");
+        assert!(!tag.is_well_formed(), "`{tag}` was accepted");
+    }
+    assert!(Tag::new("Open Question").expect("tag").is_well_formed());
+}

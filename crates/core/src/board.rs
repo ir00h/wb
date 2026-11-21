@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use wb_model::{
-    BOARD_FILE, BoardFile, BoardId, BoardInfo, BoardSnapshot, DraftSection, Error, Note, NoteCard,
-    NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, Placement, SectionId, SectionNode,
+    BOARD_FILE, BoardFile, BoardId, BoardInfo, BoardSnapshot, DraftSection, Error, Invalid, Note,
+    NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, Placement, SectionId, SectionNode,
     SectionRef, SectionTree, Tag, clean_body, clean_title, edit_note, file_name, parse, render,
     text,
 };
@@ -152,6 +152,14 @@ impl Board {
                 .and_then(|id| SectionId::parse(id).ok())
                 .filter(|id| sections.contains(id)),
         };
+        let tags = Tag::list(&draft.tags);
+        if let Some(tag) = tags.iter().find(|tag| !tag.is_well_formed()) {
+            return Err(Error::Invalid {
+                problem: Invalid::MalformedTag {
+                    tag: tag.to_string(),
+                },
+            });
+        }
         let taken = self.taken_note_ids()?;
         loop {
             let id = ids::new_note_id(|id| taken.contains(id.as_str()));
@@ -166,7 +174,7 @@ impl Board {
                     section: section.as_ref().and_then(|id| sections.path_of(id)),
                     ..Placement::default()
                 },
-                tags: Tag::list(&draft.tags),
+                tags: tags.clone(),
                 source: text::trim(&draft.source).to_owned(),
                 title: clean_title(&draft.title),
                 body: clean_body(&draft.body),
