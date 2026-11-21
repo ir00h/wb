@@ -25,16 +25,28 @@ pub fn check(root: &Path) -> Result<(), String> {
         else {
             continue;
         };
-        if parents.trim().is_empty() {
-            continue;
-        }
-        findings.extend(
-            message_problems(message)
-                .into_iter()
-                .map(|(line, problem)| Finding::new(&format!("commit {hash}"), line, problem)),
-        );
+        findings.extend(commit_findings(hash, parents, message));
     }
     finding::report(&findings)
+}
+
+fn commit_findings(hash: &str, parents: &str, message: &str) -> Vec<Finding> {
+    let commit = format!("commit {hash}");
+    let mut findings = Vec::new();
+    match parents.split_whitespace().count() {
+        0 => return findings,
+        1 => {}
+        _ => findings.push(Finding::whole(
+            &commit,
+            "is a merge commit; the history is linear, so rebase the branch instead",
+        )),
+    }
+    findings.extend(
+        message_problems(message)
+            .into_iter()
+            .map(|(line, problem)| Finding::new(&commit, line, problem)),
+    );
+    findings
 }
 
 fn type_tag(summary: &str) -> Option<&str> {
@@ -45,7 +57,7 @@ fn type_tag(summary: &str) -> Option<&str> {
         Some(_) => return None,
         None => name,
     };
-    (!name.is_empty() && name.chars().all(|c| c.is_ascii_lowercase())).then_some(prefix)
+    (!name.is_empty() && name.chars().all(|c| c.is_ascii_alphabetic())).then_some(prefix)
 }
 
 fn is_trailer(line: &str) -> bool {
@@ -105,6 +117,7 @@ fn message_problems(message: &str) -> Vec<(usize, String)> {
         problems.push((2, "a blank line must follow the summary".to_owned()));
     }
     let mut section: Option<usize> = None;
+    let mut open_heading: Option<(usize, &str)> = None;
     let mut index = 2;
     while index < lines.len() {
         let line = lines[index];
@@ -114,6 +127,9 @@ fn message_problems(message: &str) -> Vec<(usize, String)> {
             continue;
         }
         if let Some(name) = line.strip_prefix("++ ") {
+            if let Some((heading_number, heading)) = open_heading.replace((number, line)) {
+                problems.push(empty_section(heading_number, heading));
+            }
             match SECTIONS.iter().position(|known| *known == name) {
                 None => problems.push((
                     number,
@@ -137,36 +153,14 @@ fn message_problems(message: &str) -> Vec<(usize, String)> {
             continue;
         }
         if let Some(first) = line.strip_prefix("- ") {
-            let mut text = first.to_owned();
-            while let Some(next) = lines.get(index).and_then(|next| next.strip_prefix("  ")) {
-                text.push(' ');
-                text.push_str(next.trim());
-                index += 1;
-            }
+            open_heading = None;
             if section.is_none() {
                 problems.push((
                     number,
                     format!("`{line}`: a bullet must sit under a `++ <Section>` heading"),
                 ));
             }
-            if !text.ends_with('.') {
-                problems.push((number, format!("`{line}`: a bullet must end with a period")));
-            }
-            if holds_two_sentences(&text) {
-                problems.push((
-                    number,
-                    format!("`{line}`: a bullet must be one sentence; split it"),
-                ));
-            }
-            if lines.get(index).is_some_and(|next| next.starts_with("- ")) {
-                problems.push((
-                    number + 1,
-                    format!(
-                        "`{}`: bullets must be separated by a blank line",
-                        lines[index]
-                    ),
-                ));
-            }
+            index = bullet_problems(&lines, index, first, &mut problems);
             continue;
         }
         if is_trailer(line) {
@@ -181,12 +175,66 @@ fn message_problems(message: &str) -> Vec<(usize, String)> {
             ));
         }
     }
+    if let Some((heading_number, heading)) = open_heading {
+        problems.push(empty_section(heading_number, heading));
+    }
+    problems.sort_by_key(|(number, _)| *number);
     problems
+}
+
+fn bullet_problems(
+    lines: &[&str],
+    mut index: usize,
+    first: &str,
+    problems: &mut Vec<(usize, String)>,
+) -> usize {
+    let number = index;
+    let line = lines[index - 1];
+    let mut text = first.to_owned();
+    while let Some(next) = lines.get(index).and_then(|next| next.strip_prefix("  ")) {
+        if is_trailer(next.trim()) {
+            problems.push((
+                index + 1,
+                format!("`{next}`: trailer lines are not allowed, also inside a bullet; remove it"),
+            ));
+        }
+        text.push(' ');
+        text.push_str(next.trim());
+        index += 1;
+    }
+    if !text.ends_with('.') {
+        problems.push((number, format!("`{line}`: a bullet must end with a period")));
+    }
+    if holds_two_sentences(&text) {
+        problems.push((
+            number,
+            format!("`{line}`: a bullet must be one sentence; split it"),
+        ));
+    }
+    if lines.get(index).is_some_and(|next| next.starts_with("- ")) {
+        problems.push((
+            number + 1,
+            format!(
+                "`{}`: bullets must be separated by a blank line",
+                lines[index]
+            ),
+        ));
+    }
+    index
+}
+
+fn empty_section(number: usize, heading: &str) -> (usize, String) {
+    (
+        number,
+        format!(
+            "`{heading}`: a section holds at least one bullet; drop the heading or add the bullet"
+        ),
+    )
 }
 
 #[cfg(test)]
 mod tests {
-    use super::message_problems;
+    use super::{commit_findings, message_problems};
 
     fn problems(message: &str) -> Vec<String> {
         message_problems(message)
@@ -264,6 +312,55 @@ mod tests {
     fn two_sentences_in_one_bullet_are_reported() {
         let message = "Add x\n\n++ Added\n\n- Add x. Then add y.\n";
         assert_eq!(problems(message).len(), 1);
+    }
+
+    #[test]
+    fn a_type_tag_in_any_letter_case_is_reported() {
+        assert_eq!(problems("Feat: Add the board list\n").len(), 1);
+        assert_eq!(problems("Fix(ui): Tidy the board list\n").len(), 1);
+        assert_eq!(
+            problems("Add the board list: sorted by name\n"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_merge_commit_is_reported_and_a_root_commit_is_skipped() {
+        let merge: Vec<String> = commit_findings("abc1234", "1111111 2222222", GOOD)
+            .into_iter()
+            .map(|finding| finding.to_string())
+            .collect();
+        assert_eq!(
+            merge,
+            vec![
+                "commit abc1234: is a merge commit; the history is linear, so rebase the branch instead"
+            ]
+        );
+        assert!(commit_findings("abc1234", "", "anything at all").is_empty());
+    }
+
+    #[test]
+    fn an_empty_section_is_reported() {
+        assert_eq!(
+            problems("Add x\n\n++ Added\n\n++ Changed\n\n- Change x.\n\n++ Fixed\n"),
+            vec![
+                "3: `++ Added`: a section holds at least one bullet; drop the heading or add the bullet",
+                "9: `++ Fixed`: a section holds at least one bullet; drop the heading or add the bullet",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_trailer_inside_a_bullet_is_reported() {
+        let message =
+            "Add x\n\n++ Added\n\n- Add x so that people\n  Co-Authored-By: Someone <someone>\n";
+        assert_eq!(
+            problems(message),
+            vec![
+                "5: `- Add x so that people`: a bullet must end with a period",
+                "6: `Co-Authored-By: Someone <someone>`: trailer lines are not allowed, also inside a bullet; remove it",
+            ]
+        );
     }
 
     #[test]
