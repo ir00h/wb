@@ -9,9 +9,12 @@ use wb_model::{
     SectionTree, Tag, clean_body, clean_title, edit_note, file_name, parse, render,
 };
 
-use crate::failure::{io_failure, lock_failure, malformed};
+use crate::failure::{io_failure, kept_changing, lock_failure, malformed};
 use crate::folder::{self, NoteFile};
-use crate::lock::{BoardLocks, Held, LockKey, replace_file};
+use crate::lock::{BoardLocks, Held, LockKey};
+use crate::replace::{
+    Created, Renamed, Replaced, Target, create_new, rename_note, replace_if_unchanged,
+};
 use crate::{config, ids};
 
 pub(crate) fn read_board_file(folder: &Path) -> Result<BoardFile, Error> {
@@ -78,7 +81,7 @@ impl Board {
         Ok(SectionTree::from_config(&config::read(&self.folder)?))
     }
 
-    fn find(&self, id: &NoteId) -> Result<NoteFile, Error> {
+    pub(crate) fn find(&self, id: &NoteId) -> Result<NoteFile, Error> {
         folder::find(&self.folder, id)?.ok_or_else(|| Error::NoteNotFound { note: id.clone() })
     }
 
@@ -90,40 +93,39 @@ impl Board {
 
     fn add_section(&self, name: &str, parent: Option<&SectionRef>) -> Result<Outcome, Error> {
         let held = self.lock(&LockKey::Config, "the board's sections")?;
-        let mut config = config::read(&self.folder)?;
-        let parent = match parent {
-            Some(reference) => Some(section_named(
-                &SectionTree::from_config(&config),
-                reference,
-            )?),
-            None => None,
-        };
-        let mut taken: BTreeSet<String> = config
-            .section_entries()
-            .iter()
-            .map(|entry| entry.id.clone())
-            .collect();
-        if let Ok(file) = read_board_file(&self.folder) {
-            taken.extend(file.section_ids().map(str::to_owned));
-        }
-        let id = ids::new_section_id(|id| taken.contains(id.as_str()));
-        config
-            .add_section(&id, name, parent.as_ref())
-            .map_err(|problem| Error::Invalid { problem })?;
-        config::write(&self.folder, &config, &held)?;
-        let name = config
-            .section_entries()
-            .last()
-            .map(|entry| entry.name.clone())
+        let listed_in_the_board_file: BTreeSet<String> = read_board_file(&self.folder)
+            .map(|file| file.section_ids().map(str::to_owned).collect())
             .unwrap_or_default();
-        Ok(Outcome::SectionAdded {
-            section: SectionNode {
+        let section = config::change(&held, |config| {
+            let parent = match parent {
+                Some(reference) => {
+                    Some(section_named(&SectionTree::from_config(config), reference)?)
+                }
+                None => None,
+            };
+            let id = ids::new_section_id(|id| {
+                listed_in_the_board_file.contains(id.as_str())
+                    || config
+                        .section_entries()
+                        .iter()
+                        .any(|entry| entry.id == id.as_str())
+            });
+            config
+                .add_section(&id, name, parent.as_ref())
+                .map_err(|problem| Error::Invalid { problem })?;
+            let name = config
+                .section_entries()
+                .last()
+                .map(|entry| entry.name.clone())
+                .unwrap_or_default();
+            Ok(SectionNode {
                 id,
                 name,
                 hue: None,
                 children: Vec::new(),
-            },
-        })
+            })
+        })?;
+        Ok(Outcome::SectionAdded { section })
     }
 
     fn add_note(&self, draft: &NoteDraft) -> Result<Outcome, Error> {
@@ -154,55 +156,79 @@ impl Board {
                 body: clean_body(&draft.body),
                 ..Note::new(id)
             };
-            let written = self.write_note(&held, None, &note)?;
-            return Ok(Outcome::Applied {
-                note: NoteCard::of(&written, &sections),
-            });
+            let (name, text) = (file_name(&note), render(&note));
+            let target = Target::Note {
+                id: &note.id,
+                name: &name,
+            };
+            let path = self.folder.join(&name);
+            match create_new(&held, target, text.as_bytes()).map_err(io_failure(&path))? {
+                Created::Done => {
+                    return Ok(Outcome::Applied {
+                        note: NoteCard::of(&as_written(&text, note), &sections),
+                    });
+                }
+                Created::Exists => {}
+            }
         }
     }
 
     fn edit_note(&self, id: &NoteId, edit: &NoteEdit) -> Result<Outcome, Error> {
         let held = self.lock(&LockKey::Note(id.clone()), &format!("the note `{id}`"))?;
-        let found = self.find(id)?;
         let sections = self.sections()?;
-        let Ok(edited) = edit_note(&found.note, edit) else {
-            return Ok(Outcome::Conflict {
-                current: NoteCard::of(&found.note, &sections),
-            });
-        };
-        let now = if edited == found.note {
-            found.note
-        } else {
-            self.write_note(&held, Some(&found), &edited)?
-        };
-        Ok(Outcome::Applied {
-            note: NoteCard::of(&now, &sections),
-        })
-    }
-
-    fn write_note(
-        &self,
-        held: &Held,
-        current: Option<&NoteFile>,
-        note: &Note,
-    ) -> Result<Note, Error> {
-        debug_assert!(held.covers(&LockKey::Note(note.id.clone())));
-        let text = render(note);
-        let mut path = self.folder.join(file_name(note));
-        if let Some(current) = current {
-            let current_path = self.folder.join(&current.name);
-            if current_path != path && !path.exists() {
-                fs::rename(&current_path, &path).map_err(io_failure(&current_path))?;
-            } else {
-                path = current_path;
+        for _ in 0..config::ATTEMPTS {
+            let found = self.find(id)?;
+            let Ok(edited) = edit_note(&found.note, edit) else {
+                return Ok(Outcome::Conflict {
+                    current: NoteCard::of(&found.note, &sections),
+                });
+            };
+            if edited == found.note {
+                return Ok(Outcome::Applied {
+                    note: NoteCard::of(&found.note, &sections),
+                });
+            }
+            let text = render(&edited);
+            match self.rewrite(&held, &found, &edited, &text)? {
+                Replaced::Done => {
+                    return Ok(Outcome::Applied {
+                        note: NoteCard::of(&as_written(&text, edited), &sections),
+                    });
+                }
+                Replaced::Changed { .. } => {}
+                Replaced::Gone => return Err(Error::NoteNotFound { note: id.clone() }),
             }
         }
-        if current.is_none_or(|current| current.text != text) {
-            replace_file(&path, text.as_bytes()).map_err(io_failure(&path))?;
+        Err(kept_changing(&self.folder))
+    }
+
+    fn rewrite(
+        &self,
+        held: &Held,
+        found: &NoteFile,
+        note: &Note,
+        text: &str,
+    ) -> Result<Replaced, Error> {
+        let path = self.folder.join(&found.name);
+        if found.text != text {
+            let target = Target::Note {
+                id: &note.id,
+                name: &found.name,
+            };
+            let replaced =
+                replace_if_unchanged(held, target, found.text.as_bytes(), text.as_bytes())
+                    .map_err(io_failure(&path))?;
+            if replaced != Replaced::Done {
+                return Ok(replaced);
+            }
         }
-        match parse(&text) {
-            Parsed::Note(written) => Ok(*written),
-            Parsed::Stray { .. } => Ok(note.clone()),
+        let name = file_name(note);
+        if name == found.name {
+            return Ok(Replaced::Done);
+        }
+        match rename_note(held, &note.id, &found.name, &name).map_err(io_failure(&path))? {
+            Renamed::Done | Renamed::Taken => Ok(Replaced::Done),
+            Renamed::Gone => Ok(Replaced::Gone),
         }
     }
 
@@ -221,6 +247,13 @@ impl Board {
             taken.extend(file.card_ids().map(str::to_owned));
         }
         Ok(taken)
+    }
+}
+
+fn as_written(text: &str, note: Note) -> Note {
+    match parse(text) {
+        Parsed::Note(written) => *written,
+        Parsed::Stray { .. } => note,
     }
 }
 

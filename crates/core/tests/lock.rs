@@ -1,10 +1,9 @@
 mod common;
 
-use std::fs;
 use std::time::Duration;
 
 use common::Scratch;
-use wb_core::lock::{BoardLocks, LockError, LockKey, replace_file};
+use wb_core::lock::{BoardLocks, LockError, LockKey};
 use wb_model::NoteId;
 
 const AT_ONCE: Duration = Duration::from_millis(50);
@@ -44,18 +43,4 @@ fn several_keys_are_taken_in_one_call_whatever_their_order() {
             Err(LockError::Busy { .. })
         ));
     }
-}
-
-#[test]
-fn a_file_is_replaced_whole_and_nothing_is_left_beside_it() {
-    let scratch = Scratch::new("replace");
-    let path = scratch.path().join("plant-list.md");
-    replace_file(&path, b"first").expect("written");
-    replace_file(&path, b"second, longer").expect("replaced");
-    assert_eq!(fs::read(&path).expect("file"), b"second, longer");
-    let names: Vec<_> = fs::read_dir(scratch.path())
-        .expect("folder")
-        .map(|entry| entry.expect("entry").file_name())
-        .collect();
-    assert_eq!(names, ["plant-list.md"]);
 }

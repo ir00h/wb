@@ -19,6 +19,21 @@ pub fn malformed(path: &Path) -> impl Fn(serde_json::Error) -> Error {
     }
 }
 
+pub fn not_text(path: &Path) -> impl Fn(std::str::Utf8Error) -> Error {
+    move |error| Error::Malformed {
+        path: path.display().to_string(),
+        message: error.to_string(),
+    }
+}
+
+pub fn kept_changing(path: &Path) -> Error {
+    Error::Io {
+        path: path.display().to_string(),
+        message: "another program kept changing the file, so nothing was written; try again"
+            .to_owned(),
+    }
+}
+
 pub fn lock_failure(folder: &Path, what: &str) -> impl Fn(LockError) -> Error {
     move |error| match error {
         LockError::Busy { waited, .. } => Error::Busy {

@@ -30,7 +30,7 @@ const LAYERS: &[Layer] = &[
         package: "wb-core",
         role: "boards on disk",
         pure: false,
-        normal: &["serde_json", "thiserror", "wb-model"],
+        normal: &["rustix", "serde_json", "thiserror", "wb-model"],
         build: &[],
         dev: &[],
     },

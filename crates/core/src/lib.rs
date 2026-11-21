@@ -1,9 +1,12 @@
 mod board;
-pub mod config;
+mod config;
 mod failure;
 mod folder;
 mod ids;
 pub mod lock;
+#[cfg(test)]
+mod outside_writers;
+mod replace;
 mod workspace;
 
 pub use board::Board;

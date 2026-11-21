@@ -1,15 +1,16 @@
 use std::fs::{self, File, OpenOptions, TryLockError};
-use std::io::{self, Write};
+use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use thiserror::Error;
 use wb_model::NoteId;
 
 pub const LOCKS_FOLDER: &str = ".locks";
-const CONFIG_SIDECAR: &str = "board.config.lock";
+const CONFIG_STEM: &str = "board.config";
+const SIDECAR_EXTENSION: &str = "lock";
+const TEMPORARY_EXTENSION: &str = "tmp";
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,10 +20,10 @@ pub enum LockKey {
 }
 
 impl LockKey {
-    fn sidecar(&self) -> String {
+    fn file_name(&self, extension: &str) -> String {
         match self {
-            LockKey::Config => CONFIG_SIDECAR.to_owned(),
-            LockKey::Note(id) => format!("{id}.lock"),
+            LockKey::Config => format!("{CONFIG_STEM}.{extension}"),
+            LockKey::Note(id) => format!("{id}.{extension}"),
         }
     }
 }
@@ -39,6 +40,7 @@ pub enum LockError {
 
 #[derive(Debug)]
 pub struct Held {
+    board: PathBuf,
     keys: Vec<LockKey>,
     files: Vec<File>,
 }
@@ -48,18 +50,35 @@ impl Held {
     pub fn covers(&self, key: &LockKey) -> bool {
         self.keys.contains(key)
     }
+
+    pub(crate) fn board(&self) -> &Path {
+        &self.board
+    }
+
+    pub(crate) fn temporary_file(&self, key: &LockKey) -> io::Result<PathBuf> {
+        if !self.covers(key) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("this writer does not hold the lock {key:?}"),
+            ));
+        }
+        Ok(self
+            .board
+            .join(LOCKS_FOLDER)
+            .join(key.file_name(TEMPORARY_EXTENSION)))
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct BoardLocks {
-    folder: PathBuf,
+    board: PathBuf,
 }
 
 impl BoardLocks {
     #[must_use]
     pub fn of_board(board: &Path) -> BoardLocks {
         BoardLocks {
-            folder: board.join(LOCKS_FOLDER),
+            board: board.to_path_buf(),
         }
     }
 
@@ -67,14 +86,16 @@ impl BoardLocks {
         let mut sorted = keys.to_vec();
         sorted.sort();
         sorted.dedup();
-        fs::create_dir_all(&self.folder)?;
+        let folder = self.board.join(LOCKS_FOLDER);
+        fs::create_dir_all(&folder)?;
         let started = Instant::now();
         let mut held = Held {
+            board: self.board.clone(),
             keys: Vec::new(),
             files: Vec::new(),
         };
         for key in sorted {
-            let path = self.folder.join(key.sidecar());
+            let path = folder.join(key.file_name(SIDECAR_EXTENSION));
             let sidecar = OpenOptions::new().create(true).append(true).open(&path)?;
             loop {
                 match sidecar.try_lock() {
@@ -99,42 +120,4 @@ impl BoardLocks {
         }
         Ok(held)
     }
-}
-
-static TEMPORARY_FILES: AtomicU64 = AtomicU64::new(0);
-
-fn temporary_path(target: &Path) -> PathBuf {
-    let name = target
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.subsec_nanos());
-    let count = TEMPORARY_FILES.fetch_add(1, Ordering::Relaxed);
-    target.with_file_name(format!(
-        ".{name}.{}-{count}-{nanos}.tmp",
-        std::process::id()
-    ))
-}
-
-pub fn replace_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let temporary = temporary_path(path);
-    let written = write_new(&temporary, bytes).and_then(|()| fs::rename(&temporary, path));
-    if written.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    written?;
-    if let Some(folder) = path.parent()
-        && let Ok(folder) = File::open(folder)
-    {
-        let _ = folder.sync_all();
-    }
-    Ok(())
-}
-
-fn write_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(bytes)?;
-    file.sync_all()
 }

@@ -12,8 +12,8 @@ use common::{
     setting, spawn_role, wait_for,
 };
 use wb_core::lock::{BoardLocks, LockError, LockKey};
-use wb_core::{TRASH_FOLDER, Workspace, config};
-use wb_model::{Error, NoteId, Op, Outcome, SectionId};
+use wb_core::{TRASH_FOLDER, Workspace};
+use wb_model::{BoardConfig, CONFIG_FILE, Error, NoteId, Op, Outcome, SectionId};
 
 const WRITERS: usize = 20;
 const OTHER_PROCESS: &str = "another_process_plays_its_role";
@@ -316,14 +316,16 @@ fn stall_inside_a_config_change(folder: &Path) -> Stalled {
         let held = BoardLocks::of_board(&folder)
             .acquire(&[LockKey::Config], LONG_DEADLINE)
             .expect("holder lock");
-        let mut config = config::read(&folder).expect("config");
+        let path = folder.join(CONFIG_FILE);
+        let text = fs::read_to_string(&path).unwrap_or_default();
+        let mut config = BoardConfig::parse(&text).expect("config");
         entered.send(()).expect("signal");
         thread::sleep(STALL);
         let id = SectionId::parse("sholder").expect("section id");
         config
             .add_section(&id, "From the holder", None)
             .expect("section");
-        config::write(&folder, &config, &held).expect("config written");
+        fs::write(&path, config.render().expect("config text")).expect("config written");
         let left = Instant::now();
         drop(held);
         left

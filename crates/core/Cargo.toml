@@ -11,5 +11,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 wb-model.workspace = true
 
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+rustix.workspace = true
+
 [lints]
 workspace = true

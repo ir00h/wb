@@ -7,7 +7,7 @@ use wb_model::{BOARD_FILE, BoardFile, BoardId, BoardInfo, Error, Invalid, slug, 
 
 use crate::board::{Board, read_board_file};
 use crate::failure::{io_failure, malformed};
-use crate::lock::replace_file;
+use crate::replace::create_in_a_folder_made_for_it;
 
 pub const DEFAULT_LOCK_DEADLINE: Duration = Duration::from_secs(10);
 const RESERVED_FOLDERS: [&str; 2] = ["assets", "files"];
@@ -81,7 +81,7 @@ impl Workspace {
         let (folder_name, folder) = create_free_folder(&parent_folder, &name)?;
         let path = folder.join(BOARD_FILE);
         let text = BoardFile::new(&name).render().map_err(malformed(&path))?;
-        replace_file(&path, text.as_bytes()).map_err(io_failure(&path))?;
+        create_in_a_folder_made_for_it(&path, text.as_bytes()).map_err(io_failure(&path))?;
         let id = child_id(parent, &folder_name).ok_or_else(|| Error::Io {
             path: folder.display().to_string(),
             message: "the new folder name is not a board id".to_owned(),
