@@ -8,6 +8,7 @@ mod layers;
 mod process;
 mod purity;
 mod shapes;
+mod shell;
 mod window;
 mod window_rules;
 

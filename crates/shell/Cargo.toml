@@ -10,13 +10,31 @@ publish.workspace = true
 name = "whiteboard"
 path = "src/main.rs"
 
+[features]
+automation = [
+  "dep:serde",
+  "dep:serde_json",
+  "dep:tiny_http",
+  "dep:block2",
+  "dep:objc2",
+  "dep:objc2-foundation",
+]
+
 [build-dependencies]
 tauri-build.workspace = true
 
 [dependencies]
+serde = { workspace = true, optional = true }
+serde_json = { workspace = true, optional = true }
 tauri.workspace = true
+tiny_http = { workspace = true, optional = true }
 wb-core.workspace = true
 wb-model.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = { workspace = true, optional = true }
+objc2 = { workspace = true, optional = true }
+objc2-foundation = { workspace = true, optional = true, features = ["std", "NSData"] }
 
 [lints]
 workspace = true

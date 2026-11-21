@@ -1,9 +1,10 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use ra_ap_rustc_lexer::{FrontmatterAllowed, TokenKind, tokenize};
 use serde_json::Value;
 
-use crate::finding::{self, Finding};
+use crate::finding::{self, Finding, line_of};
 use crate::process;
 use crate::purity::{self, SourceFile};
 
@@ -45,7 +46,17 @@ const LAYERS: &[Layer] = &[
         package: "whiteboard",
         role: "the desktop shell",
         pure: false,
-        normal: &["tauri", "wb-core", "wb-model"],
+        normal: &[
+            "block2",
+            "objc2",
+            "objc2-foundation",
+            "serde",
+            "serde_json",
+            "tauri",
+            "tiny_http",
+            "wb-core",
+            "wb-model",
+        ],
         build: &["tauri-build"],
         dev: &[],
     },
@@ -71,6 +82,8 @@ const LAYERS: &[Layer] = &[
 ];
 
 const ROOT_MANIFEST: &str = "Cargo.toml";
+const UNSAFE_CODE_HOME: &str = "crates/shell/src/automation/macos.rs";
+const UNSAFE_WORDS: [&str; 2] = ["unsafe", "unsafe_code"];
 
 pub fn packages() -> impl Iterator<Item = &'static str> {
     LAYERS.iter().map(|layer| layer.package)
@@ -124,6 +137,17 @@ pub fn check(root: &Path) -> Result<(), String> {
             findings.extend(purity_findings(root, package, &tracked));
         }
     }
+    for path in &tracked {
+        let is_rust = Path::new(path)
+            .extension()
+            .is_some_and(|extension| extension == "rs");
+        if !is_rust || path == UNSAFE_CODE_HOME {
+            continue;
+        }
+        if let Ok(text) = std::fs::read_to_string(root.join(path)) {
+            findings.extend(unsafe_uses(path, &text));
+        }
+    }
     finding::report(&findings)
 }
 
@@ -153,6 +177,26 @@ fn table_findings(packages: &BTreeMap<String, Package>) -> Vec<Finding> {
         }
     }
     findings
+}
+
+fn unsafe_uses(path: &str, text: &str) -> Vec<Finding> {
+    let mut offset = 0;
+    let mut found = Vec::new();
+    for token in tokenize(text, FrontmatterAllowed::No) {
+        let length = token.len as usize;
+        let word = &text[offset..offset + length];
+        if token.kind == TokenKind::Ident && UNSAFE_WORDS.contains(&word) {
+            found.push(Finding::new(
+                path,
+                line_of(text, offset),
+                format!(
+                    "`{word}` outside {UNSAFE_CODE_HOME}; only the automation channel's native web view calls may use unsafe code, so find a safe API or move the call there"
+                ),
+            ));
+        }
+        offset += length;
+    }
+    found
 }
 
 fn nested_workspaces(root: &Path, tracked: &[String]) -> Vec<Finding> {
@@ -310,6 +354,7 @@ mod tests {
 
     use super::{
         Kind, Package, declares_workspace, parse_metadata, table_findings, target_findings,
+        unsafe_uses,
     };
 
     fn packages(entries: &[(&str, &[(&str, Kind)])]) -> BTreeMap<String, Package> {
@@ -443,5 +488,15 @@ mod tests {
         assert!(!declares_workspace(
             "[package]\nname = \"wb\"\nversion.workspace = true\n\n[dependencies]\nclap.workspace = true\n"
         ));
+    }
+
+    #[test]
+    fn unsafe_code_is_reported_with_its_line() {
+        let text = "#![allow(unsafe_code)]\nfn read() {\n    unsafe { core::ptr::null::<u8>().read() };\n}\nconst NOTE: &str = \"unsafe\";\n";
+        let lines: Vec<Option<usize>> = unsafe_uses("crates/core/src/lib.rs", text)
+            .into_iter()
+            .map(|finding| finding.line)
+            .collect();
+        assert_eq!(lines, vec![Some(1), Some(3)]);
     }
 }

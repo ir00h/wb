@@ -33,6 +33,8 @@ pnpm tauri dev
 cargo xtask check
 ```
 
-This runs every check and prints one line per step. Continuous integration runs the same command. To run one step, name it: `cargo xtask check comments`. The steps are `comments`, `layers`, `bindings`, `commits`, `hygiene`, `rust` and `window`.
+This runs every check and prints one line per step. Continuous integration runs the same command. To run one step, name it: `cargo xtask check comments`. The steps are `comments`, `layers`, `bindings`, `commits`, `hygiene`, `rust`, `window` and `shell-default-clean`.
+
+`shell-default-clean` builds the default shell and fails when the binary contains any part of the automation channel, which exists only under the `automation` feature.
 
 Code carries no comments. Say it in code: a name, a type, a test.

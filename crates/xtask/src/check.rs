@@ -2,7 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use crate::{bindings, comments, commits, hygiene, layers, process, window, window_rules};
+use crate::{bindings, comments, commits, hygiene, layers, process, shell, window, window_rules};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Step {
@@ -13,6 +13,7 @@ pub enum Step {
     Hygiene,
     Rust,
     Window,
+    ShellDefaultClean,
 }
 
 impl Step {
@@ -24,6 +25,7 @@ impl Step {
         Step::Hygiene,
         Step::Rust,
         Step::Window,
+        Step::ShellDefaultClean,
     ];
 
     pub fn name(self) -> &'static str {
@@ -35,6 +37,7 @@ impl Step {
             Step::Hygiene => "hygiene",
             Step::Rust => "rust",
             Step::Window => "window",
+            Step::ShellDefaultClean => "shell-default-clean",
         }
     }
 
@@ -55,6 +58,7 @@ impl Step {
             Step::Hygiene => hygiene::check(root),
             Step::Rust => rust(root),
             Step::Window => window::check(root),
+            Step::ShellDefaultClean => shell::default_clean(root),
         }
     }
 }
@@ -90,6 +94,19 @@ fn rust_commands() -> Vec<Vec<&'static str>> {
         "-D",
         "warnings",
     ]);
+    commands.push(vec![
+        "cargo",
+        "clippy",
+        "--package",
+        "whiteboard",
+        "--all-targets",
+        "--features",
+        "automation",
+        "--locked",
+        "--",
+        "-D",
+        "warnings",
+    ]);
     commands.push(vec!["cargo", "test", "--workspace", "--locked", "--quiet"]);
     commands
 }
@@ -101,7 +118,7 @@ pub fn run(root: &Path, steps: &[Step]) -> ExitCode {
         let outcome = step.run(root);
         let seconds = started.elapsed().as_secs_f64();
         let verdict = if outcome.is_ok() { "pass" } else { "FAIL" };
-        println!("{verdict}  {:<9} {seconds:>6.2}s", step.name());
+        println!("{verdict}  {:<19} {seconds:>7.2}s", step.name());
         if let Err(report) = outcome {
             failed.push((step, report));
         }
