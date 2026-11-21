@@ -69,27 +69,29 @@ fn all<const N: usize>(outcomes: [Result<(), String>; N]) -> Result<(), String> 
 }
 
 fn rust(root: &Path) -> Result<(), String> {
-    process::run_all(
-        root,
-        &[
-            &["cargo", "fmt", "--all", "--check"],
-            &["cargo", "check", "--locked", "--quiet", "-p", "wb-model"],
-            &["cargo", "check", "--locked", "--quiet", "-p", "wb-core"],
-            &["cargo", "check", "--locked", "--quiet", "-p", "wb"],
-            &["cargo", "check", "--locked", "--quiet", "-p", "whiteboard"],
-            &[
-                "cargo",
-                "clippy",
-                "--workspace",
-                "--all-targets",
-                "--locked",
-                "--",
-                "-D",
-                "warnings",
-            ],
-            &["cargo", "test", "--workspace", "--locked", "--quiet"],
-        ],
-    )
+    let commands = rust_commands();
+    let commands: Vec<&[&str]> = commands.iter().map(Vec::as_slice).collect();
+    process::run_all(root, &commands)
+}
+
+fn rust_commands() -> Vec<Vec<&'static str>> {
+    let mut commands = vec![vec!["cargo", "fmt", "--all", "--check"]];
+    commands.extend(
+        layers::packages()
+            .map(|package| vec!["cargo", "check", "--locked", "--quiet", "-p", package]),
+    );
+    commands.push(vec![
+        "cargo",
+        "clippy",
+        "--workspace",
+        "--all-targets",
+        "--locked",
+        "--",
+        "-D",
+        "warnings",
+    ]);
+    commands.push(vec!["cargo", "test", "--workspace", "--locked", "--quiet"]);
+    commands
 }
 
 pub fn run(root: &Path, steps: &[Step]) -> ExitCode {
@@ -113,4 +115,22 @@ pub fn run(root: &Path, steps: &[Step]) -> ExitCode {
     let names: Vec<&str> = failed.iter().map(|(step, _)| step.name()).collect();
     println!("\nfailed: {}", names.join(", "));
     ExitCode::FAILURE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rust_commands;
+    use crate::layers;
+
+    #[test]
+    fn every_package_in_the_layer_table_is_built_alone() {
+        let built_alone: Vec<&str> = rust_commands()
+            .iter()
+            .filter_map(|command| match command.as_slice() {
+                ["cargo", "check", "--locked", "--quiet", "-p", package] => Some(*package),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(built_alone, layers::packages().collect::<Vec<_>>());
+    }
 }

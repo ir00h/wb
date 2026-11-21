@@ -72,6 +72,10 @@ const LAYERS: &[Layer] = &[
 
 const ROOT_MANIFEST: &str = "Cargo.toml";
 
+pub fn packages() -> impl Iterator<Item = &'static str> {
+    LAYERS.iter().map(|layer| layer.package)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Normal,
