@@ -1,6 +1,8 @@
 mod check;
 mod comments;
+mod commits;
 mod finding;
+mod hygiene;
 mod process;
 
 use std::path::PathBuf;
