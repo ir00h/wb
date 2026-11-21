@@ -11,7 +11,7 @@ use wb_model::{
 };
 
 use crate::failure::{io_failure, kept_changing, lock_failure, malformed};
-use crate::folder::{self, NoteFile};
+use crate::folder::{self, Found};
 use crate::lock::{BoardLocks, Held, LockKey};
 use crate::replace::{
     Created, Renamed, Replaced, Target, create_new, rename_note, replace_if_unchanged,
@@ -22,6 +22,13 @@ pub(crate) fn read_board_file(folder: &Path) -> Result<BoardFile, Error> {
     let path = folder.join(BOARD_FILE);
     let text = fs::read_to_string(&path).map_err(io_failure(&path))?;
     BoardFile::parse(&text).map_err(malformed(&path))
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteFile {
+    pub name: String,
+    pub path: PathBuf,
+    pub note: Note,
 }
 
 #[derive(Debug, Clone)]
@@ -66,8 +73,33 @@ impl Board {
         })
     }
 
+    #[must_use]
+    pub fn folder(&self) -> &Path {
+        &self.folder
+    }
+
     pub fn note(&self, id: &NoteId) -> Result<Note, Error> {
         Ok(self.find(id)?.note)
+    }
+
+    pub fn note_file(&self, id: &NoteId) -> Result<NoteFile, Error> {
+        Ok(self.note_file_of(self.find(id)?))
+    }
+
+    pub fn notes(&self) -> Result<Vec<NoteFile>, Error> {
+        Ok(folder::scan(&self.folder)?
+            .notes
+            .into_iter()
+            .map(|found| self.note_file_of(found))
+            .collect())
+    }
+
+    fn note_file_of(&self, found: Found) -> NoteFile {
+        NoteFile {
+            path: self.folder.join(&found.name),
+            name: found.name,
+            note: found.note,
+        }
     }
 
     pub fn apply(&self, op: Op) -> Result<Outcome, Error> {
@@ -87,7 +119,7 @@ impl Board {
         Ok(SectionTree::from_config(&config::read(&self.folder)?))
     }
 
-    pub(crate) fn find(&self, id: &NoteId) -> Result<NoteFile, Error> {
+    pub(crate) fn find(&self, id: &NoteId) -> Result<Found, Error> {
         folder::find(&self.folder, id)?.ok_or_else(|| Error::NoteNotFound { note: id.clone() })
     }
 
@@ -229,7 +261,7 @@ impl Board {
     fn rewrite(
         &self,
         held: &Held,
-        found: &NoteFile,
+        found: &Found,
         note: &Note,
         text: &str,
     ) -> Result<Replaced, Error> {

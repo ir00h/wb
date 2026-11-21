@@ -10,13 +10,13 @@ pub const TRASH_FOLDER: &str = ".trash";
 const NOTE_EXTENSION: &str = ".md";
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct NoteFile {
+pub struct Found {
     pub name: String,
     pub text: String,
     pub note: Note,
 }
 
-impl NoteFile {
+impl Found {
     fn is_named_for_its_id(&self) -> bool {
         is_named_for(&self.name, &self.note.id)
     }
@@ -24,12 +24,12 @@ impl NoteFile {
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Scan {
-    pub notes: Vec<NoteFile>,
+    pub notes: Vec<Found>,
     pub strays: Vec<String>,
 }
 
 enum Read {
-    Note(Box<NoteFile>),
+    Note(Box<Found>),
     Stray,
     Missing,
 }
@@ -73,7 +73,7 @@ fn read(folder: &Path, name: String) -> Result<Read, Error> {
         Err(error) => return Err(io_failure(&path)(error)),
     };
     Ok(match parse(&text) {
-        Parsed::Note(note) => Read::Note(Box::new(NoteFile {
+        Parsed::Note(note) => Read::Note(Box::new(Found {
             name,
             text,
             note: *note,
@@ -107,7 +107,7 @@ pub fn scan(folder: &Path) -> Result<Scan, Error> {
     Ok(scan)
 }
 
-fn the_one_file(id: &NoteId, mut holding: Vec<NoteFile>) -> Result<Option<NoteFile>, Error> {
+fn the_one_file(id: &NoteId, mut holding: Vec<Found>) -> Result<Option<Found>, Error> {
     if holding.len() > 1 {
         return Err(Error::DuplicateNote {
             note: id.clone(),
@@ -117,7 +117,7 @@ fn the_one_file(id: &NoteId, mut holding: Vec<NoteFile>) -> Result<Option<NoteFi
     Ok(holding.pop())
 }
 
-fn holding(folder: &Path, id: &NoteId, names: Vec<String>) -> Result<Vec<NoteFile>, Error> {
+fn holding(folder: &Path, id: &NoteId, names: Vec<String>) -> Result<Vec<Found>, Error> {
     let mut holding = Vec::new();
     for name in names {
         if let Read::Note(file) = read(folder, name)?
@@ -129,7 +129,7 @@ fn holding(folder: &Path, id: &NoteId, names: Vec<String>) -> Result<Vec<NoteFil
     Ok(holding)
 }
 
-pub fn find(folder: &Path, id: &NoteId) -> Result<Option<NoteFile>, Error> {
+pub fn find(folder: &Path, id: &NoteId) -> Result<Option<Found>, Error> {
     let (named, other): (Vec<String>, Vec<String>) = note_file_names(folder)?
         .into_iter()
         .partition(|name| is_named_for(name, id));

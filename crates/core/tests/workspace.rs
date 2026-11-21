@@ -173,6 +173,12 @@ fn a_new_note_lands_in_its_section_under_a_name_from_its_title() {
         )
     );
     assert_eq!(board.note(&note.id).expect("note").title, "Plant list");
+    let file = board.note_file(&note.id).expect("note file");
+    assert_eq!(file.name, format!("plant-list-{}.md", note.id));
+    assert_eq!(file.path, board.folder().join(&file.name));
+    assert_eq!(file.path, scratch.path().join("garden").join(&file.name));
+    assert_eq!(file.note.source, "seed catalogue");
+    assert_eq!(board.notes().expect("notes"), [file]);
 
     let snapshot = board.snapshot().expect("snapshot");
     assert_eq!(snapshot.board.name, "Garden");
@@ -342,4 +348,45 @@ fn a_note_with_a_tag_that_is_not_well_formed_is_refused_and_nothing_is_written()
         })
     );
     assert_eq!(tree_bytes(scratch.path()), before);
+}
+
+#[test]
+fn the_notes_of_a_board_are_listed_whole_with_their_files_in_the_order_of_a_snapshot() {
+    let scratch = Scratch::new("notes-with-files");
+    let board = scratch.garden();
+    let seeds = add_note(&board, "Seeds", "Beans");
+    let plants = add_note(&board, "Plant list", "Tomatoes");
+    let folder = scratch.path().join("garden");
+    fs::write(folder.join("rhubarb.md"), "# Rhubarb\n").expect("stray");
+    fs::write(
+        folder.join("zz-copy.md"),
+        format!("---\nid: {}\n---\n\n# A copy\n", seeds.id),
+    )
+    .expect("copy");
+
+    let before = tree_bytes(scratch.path());
+    let listed = board.notes().expect("notes");
+    let snapshot = board.snapshot().expect("snapshot");
+    assert_eq!(tree_bytes(scratch.path()), before);
+
+    let ids = |notes: Vec<NoteId>| notes;
+    assert_eq!(
+        ids(listed.iter().map(|file| file.note.id.clone()).collect()),
+        ids(snapshot.notes.iter().map(|note| note.id.clone()).collect())
+    );
+    for file in &listed {
+        assert_eq!(file.path, folder.join(&file.name));
+        assert_eq!(
+            wb_model::parse(&fs::read_to_string(&file.path).expect("note file")),
+            wb_model::Parsed::Note(Box::new(file.note.clone()))
+        );
+    }
+    let names: Vec<&str> = listed.iter().map(|file| file.name.as_str()).collect();
+    assert_eq!(
+        names,
+        [
+            format!("plant-list-{}.md", plants.id),
+            format!("seeds-{}.md", seeds.id)
+        ]
+    );
 }
