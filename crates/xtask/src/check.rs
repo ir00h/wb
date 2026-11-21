@@ -14,6 +14,7 @@ pub enum Step {
     Rust,
     Window,
     ShellDefaultClean,
+    E2e,
 }
 
 impl Step {
@@ -26,6 +27,7 @@ impl Step {
         Step::Rust,
         Step::Window,
         Step::ShellDefaultClean,
+        Step::E2e,
     ];
 
     pub fn name(self) -> &'static str {
@@ -38,6 +40,7 @@ impl Step {
             Step::Rust => "rust",
             Step::Window => "window",
             Step::ShellDefaultClean => "shell-default-clean",
+            Step::E2e => "e2e",
         }
     }
 
@@ -59,6 +62,7 @@ impl Step {
             Step::Rust => rust(root),
             Step::Window => window::check(root),
             Step::ShellDefaultClean => shell::default_clean(root),
+            Step::E2e => shell::journeys(root),
         }
     }
 }

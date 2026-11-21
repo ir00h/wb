@@ -8,6 +8,8 @@ on:
 jobs:
   check:
     runs-on: macos-latest
+    env:
+      WB_E2E_FOREGROUND: "1"
     steps:
       - uses: actions/checkout@v5
         with:

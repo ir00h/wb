@@ -12,6 +12,7 @@ Whiteboard is a desktop app that shows a folder of Markdown notes as cards on a 
 | `crates/shell` | `whiteboard`: the Tauri desktop shell                                                  |
 | `crates/xtask` | the check command and the bindings generator                                           |
 | `window`       | the TypeScript window: `bindings`, `domain`, `bridge`, `state` and `ui`                |
+| `e2e`          | journeys that drive the real desktop app, and the driver they use                      |
 
 The TypeScript types in `window/src/bindings` are generated from the Rust types. Change the Rust type, then run `cargo xtask bindings`.
 
@@ -33,8 +34,21 @@ pnpm tauri dev
 cargo xtask check
 ```
 
-This runs every check and prints one line per step. Continuous integration runs the same command. To run one step, name it: `cargo xtask check comments`. The steps are `comments`, `layers`, `bindings`, `commits`, `hygiene`, `rust`, `window` and `shell-default-clean`.
+This runs every check and prints one line per step. Continuous integration runs the same command. To run one step, name it: `cargo xtask check comments`. The steps are `comments`, `layers`, `bindings`, `commits`, `hygiene`, `rust`, `window`, `shell-default-clean` and `e2e`.
 
-`shell-default-clean` builds the default shell and fails when the binary contains any part of the automation channel, which exists only under the `automation` feature.
+## Journeys in the real app
+
+`cargo xtask check e2e` builds the window and the shell with the `automation` feature, then runs every journey in `e2e/journeys` against the real app in its own web view. Each launch gets a new temporary workspace and data folder. The shell built for the journeys stays at `target/debug/whiteboard-automation`.
+
+With the feature on, setting `WB_AUTOMATION_PORT` makes the shell listen on `127.0.0.1` at that port (`0` lets the system choose) and print `AUTOMATION_LISTENING 127.0.0.1:<port>` once the page has loaded. It answers only programs on the same machine, and refuses requests that carry an `Origin` header, so a web page cannot reach it.
+
+| Route            | Does                                                                                                                                           |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /evaluate` | runs the request body as the body of an async function in the web view and returns its value as JSON; status 422 with the error when it throws |
+| `GET /snapshot`  | returns a PNG of the web view                                                                                                                  |
+| `GET /window`    | returns the title, size, scale, window number and whether background mode is on                                                                |
+| `POST /quit`     | quits the app                                                                                                                                  |
+
+`WB_AUTOMATION_BACKGROUND=1` keeps the app from ever becoming the frontmost app and keeps the page rendering while the window is hidden behind others (macOS). Journeys run in background mode; `WB_E2E_FOREGROUND=1` turns it off, as continuous integration does. `shell-default-clean` fails when the default shell binary contains any part of the channel.
 
 Code carries no comments. Say it in code: a name, a type, a test.

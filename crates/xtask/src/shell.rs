@@ -1,10 +1,14 @@
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 
-use crate::process;
+use crate::{process, window};
 
 const SHELL_PACKAGE: &str = "whiteboard";
+const AUTOMATION_FEATURES: &str = "automation,tauri/custom-protocol";
+const JOURNEY_RUNNER: &str = "e2e/run.ts";
+const AUTOMATION_EXECUTABLE: &str = "whiteboard-automation";
 
 const CHANNEL_MARKERS: [&str; 5] = [
     "AUTOMATION_LISTENING",
@@ -44,6 +48,43 @@ fn executable_in(messages: &str) -> Option<PathBuf> {
             message["reason"] == "compiler-artifact" && message["target"]["name"] == SHELL_PACKAGE
         })
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
+}
+
+pub fn journeys(root: &Path) -> Result<(), String> {
+    window::ensure_packages(root)?;
+    process::output(root, &["pnpm", "exec", "vite", "build"])?;
+    let built = build(root, Some(AUTOMATION_FEATURES))?;
+    let shell = built.with_file_name(AUTOMATION_EXECUTABLE);
+    copy_to_new_file(&built, &shell).map_err(|error| {
+        format!(
+            "cannot copy {} to {}: {error}",
+            built.display(),
+            shell.display()
+        )
+    })?;
+    let output = Command::new("node")
+        .arg(JOURNEY_RUNNER)
+        .env("WB_E2E_SHELL", &shell)
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("`node {JOURNEY_RUNNER}` could not start: {error}"))?;
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "`node {JOURNEY_RUNNER}` failed ({}); the journey lines above say why\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn copy_to_new_file(from: &Path, to: &Path) -> std::io::Result<u64> {
+    match std::fs::remove_file(to) {
+        Err(error) if error.kind() != std::io::ErrorKind::NotFound => return Err(error),
+        _ => {}
+    }
+    std::fs::copy(from, to)
 }
 
 pub fn default_clean(root: &Path) -> Result<(), String> {

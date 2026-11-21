@@ -6,7 +6,7 @@ use crate::process;
 const LOCKFILE: &str = "pnpm-lock.yaml";
 const INSTALLED_LOCKFILE: &str = "node_modules/.pnpm/lock.yaml";
 
-fn ensure_packages(root: &Path) -> Result<(), String> {
+pub fn ensure_packages(root: &Path) -> Result<(), String> {
     let wanted = fs::read(root.join(LOCKFILE))
         .map_err(|error| format!("cannot read {LOCKFILE}: {error}"))?;
     let installed = fs::read(root.join(INSTALLED_LOCKFILE)).ok();
@@ -31,6 +31,7 @@ pub fn check(root: &Path) -> Result<(), String> {
                 "-p",
                 "tsconfig.node.json",
             ],
+            &["pnpm", "exec", "tsc", "--noEmit", "-p", "tsconfig.e2e.json"],
             &["pnpm", "exec", "vitest", "run"],
             &["pnpm", "exec", "vite", "build"],
         ],
