@@ -41,9 +41,12 @@ fn is_stale(change: &Change<String>, current: &str, clean: fn(&str) -> String) -
 }
 
 fn appended(body: &str, more: &str) -> String {
-    let (body, more) = (clean_body(body), text::trim(more));
-    if body.is_empty() || more.is_empty() {
-        return body + more;
+    let body = clean_body(body);
+    if text::trim(more).is_empty() {
+        return body;
     }
-    body + PARAGRAPH_BREAK + more
+    if body.is_empty() {
+        return clean_body(more);
+    }
+    body + PARAGRAPH_BREAK + text::trim(more)
 }

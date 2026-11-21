@@ -1,8 +1,8 @@
 use serde_json::json;
 use wb_model::{
     BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, Note,
-    NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, SectionId, SectionNode, SectionRef,
-    StaleBase, Tag, diff, edit_note,
+    NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, SectionId, SectionNode, SectionRef,
+    StaleBase, Tag, diff, edit_note, parse, render,
 };
 
 fn note_id(text: &str) -> NoteId {
@@ -163,6 +163,27 @@ fn appended_text_becomes_a_new_paragraph() {
         edit_note(&empty, &append("Beans")).expect("applied").body,
         "Beans"
     );
+    assert_eq!(edit_note(&once, &append(" \n")).expect("applied"), once);
+}
+
+#[test]
+fn text_appended_to_an_empty_body_is_kept_as_given() {
+    let empty = Note {
+        body: String::new(),
+        ..plant_list()
+    };
+    let indented = NoteEdit {
+        title: None,
+        body: Some(BodyChange::Append {
+            text: "    let rows = 4;\n    sow(rows);\n".to_owned(),
+        }),
+    };
+    let edited = edit_note(&empty, &indented).expect("applied");
+    assert_eq!(
+        edited.body, "    let rows = 4;\n    sow(rows);",
+        "the first line of the appended text lost its indent"
+    );
+    assert_eq!(parse(&render(&edited)), Parsed::Note(Box::new(edited)));
 }
 
 #[test]
