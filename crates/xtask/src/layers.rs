@@ -38,9 +38,9 @@ const LAYERS: &[Layer] = &[
         package: "wb",
         role: "the command-line tool",
         pure: false,
-        normal: &["clap", "wb-core", "wb-model"],
+        normal: &["clap", "serde", "serde_json", "wb-core", "wb-model"],
         build: &[],
-        dev: &[],
+        dev: &["serde_json"],
     },
     Layer {
         package: "whiteboard",
