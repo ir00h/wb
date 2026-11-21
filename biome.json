@@ -9,7 +9,7 @@
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100,
-    "includes": ["**", "!window/src/bindings"]
+    "includes": ["**", "!window/src/bindings/**"]
   },
   "json": {
     "parser": { "allowComments": false, "allowTrailingCommas": false }
