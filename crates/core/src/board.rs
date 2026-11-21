@@ -129,7 +129,7 @@ impl Board {
     }
 
     fn add_note(&self, draft: &NoteDraft) -> Result<Outcome, Error> {
-        let config = config::read(&self.folder)?;
+        let config = config::read_for_a_write(&self.folder)?;
         let sections = SectionTree::from_config(&config);
         let section = match &draft.section {
             Some(reference) => Some(section_named(&sections, reference)?),
