@@ -60,6 +60,7 @@ const LAYERS: &[Layer] = &[
             "proc-macro2",
             "ra-ap-rustc_lexer",
             "serde_json",
+            "syn",
             "toml",
             "ts-rs",
             "wb-model",

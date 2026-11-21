@@ -77,13 +77,8 @@ fn parse_board_id(text: &str) -> Result<(), IdError> {
     Ok(())
 }
 
-macro_rules! id_type {
-    ($name:ident, $brand:literal, $rule:ident) => {
-        #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-        #[serde(try_from = "String", into = "String")]
-        #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(type = $brand))]
-        pub struct $name(String);
-
+macro_rules! id_rules {
+    ($name:ident, $rule:ident) => {
         impl $name {
             pub fn parse(text: &str) -> Result<Self, IdError> {
                 $rule(text)?;
@@ -127,18 +122,35 @@ macro_rules! id_type {
     };
 }
 
-id_type!(
-    NoteId,
-    "string & { readonly __brand: \"NoteId\" }",
-    parse_item_id
-);
-id_type!(
-    SectionId,
-    "string & { readonly __brand: \"SectionId\" }",
-    parse_item_id
-);
-id_type!(
-    BoardId,
-    "string & { readonly __brand: \"BoardId\" }",
-    parse_board_id
-);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(type = "string & { readonly __brand: \"NoteId\" }")
+)]
+pub struct NoteId(String);
+
+id_rules!(NoteId, parse_item_id);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(type = "string & { readonly __brand: \"SectionId\" }")
+)]
+pub struct SectionId(String);
+
+id_rules!(SectionId, parse_item_id);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(try_from = "String", into = "String")]
+#[cfg_attr(
+    feature = "ts",
+    derive(ts_rs::TS),
+    ts(type = "string & { readonly __brand: \"BoardId\" }")
+)]
+pub struct BoardId(String);
+
+id_rules!(BoardId, parse_board_id);

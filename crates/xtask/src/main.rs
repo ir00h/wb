@@ -7,6 +7,7 @@ mod hygiene;
 mod layers;
 mod process;
 mod purity;
+mod shapes;
 mod window;
 
 use std::path::PathBuf;
