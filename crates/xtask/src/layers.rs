@@ -63,7 +63,10 @@ struct Edge {
 }
 
 pub fn check(root: &Path) -> Result<(), String> {
-    let metadata = process::output(root, &["cargo", "metadata", "--format-version", "1"])?;
+    let metadata = process::output(
+        root,
+        &["cargo", "metadata", "--locked", "--format-version", "1"],
+    )?;
     let graph = parse_metadata(&metadata)?;
     let mut findings = graph_findings(&graph);
     for path in finding::tracked_files(root)? {
