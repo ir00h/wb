@@ -34,6 +34,8 @@ kitchen/recipes), else $WB_BOARD.
 Output is text for people; --json prints JSON for programs. Errors are one sentence on stderr
 with exit code 1 (2 for wrong arguments).";
 
+const HELP_WIDTH: usize = 100;
+
 const EXAMPLES: &str = "\
 Examples:
   wb --workspace boards board list
@@ -51,6 +53,7 @@ Examples:
     about = ABOUT,
     long_about = LONG_ABOUT,
     after_long_help = EXAMPLES,
+    term_width = HELP_WIDTH,
     propagate_version = true
 )]
 struct Cli {
