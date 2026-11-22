@@ -22,4 +22,15 @@ describe("parseFailure", () => {
     expect(parseFailure("apply", { error: { type: "busy" } }).kind).toBe("badCall");
     expect(parseFailure("apply", { error: "busy", message: "x" }).kind).toBe("badCall");
   });
+
+  it("keeps the shell's sentence when the kind of the error is one the window does not know", () => {
+    const rejection = {
+      error: { type: "soilTooWet", board: "garden" },
+      message: "the soil of `garden` is too wet to plant",
+    };
+    expect(parseFailure("apply", rejection)).toEqual({
+      kind: "badCall",
+      message: "the soil of `garden` is too wet to plant",
+    });
+  });
 });

@@ -32,13 +32,12 @@ function isErrorType(value: unknown): value is CoreError["type"] {
 }
 
 export function parseFailure(call: CallName, rejection: unknown): Failure {
-  if (
-    isRecord(rejection) &&
-    typeof rejection.message === "string" &&
-    isRecord(rejection.error) &&
-    isErrorType(rejection.error.type)
-  ) {
-    return { kind: rejection.error.type, message: rejection.message };
+  if (isRecord(rejection) && typeof rejection.message === "string") {
+    const kind =
+      isRecord(rejection.error) && isErrorType(rejection.error.type)
+        ? rejection.error.type
+        : "badCall";
+    return { kind, message: rejection.message };
   }
   return {
     kind: "badCall",
