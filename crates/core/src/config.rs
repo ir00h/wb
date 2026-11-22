@@ -46,14 +46,9 @@ fn read_when_settled(path: &Path) -> Result<Option<Vec<u8>>, Error> {
     Ok(bytes)
 }
 
-pub fn read_for_a_write(board: &Path) -> Result<BoardConfig, Error> {
-    let path = board.join(CONFIG_FILE);
-    parse(&path, read_when_settled(&path)?.as_deref())
-}
-
 pub fn read(board: &Path) -> Result<BoardConfig, Error> {
     let path = board.join(CONFIG_FILE);
-    parse(&path, read_bytes(&path)?.as_deref())
+    parse(&path, read_when_settled(&path)?.as_deref())
 }
 
 pub fn change<T>(

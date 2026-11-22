@@ -1,11 +1,9 @@
 use std::env;
 use std::ffi::OsString;
-use std::fs;
-use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use wb_core::{Board, Workspace};
-use wb_model::{BOARD_FILE, BoardConfig, BoardFile, BoardId, CONFIG_FILE, Error, SectionTree};
+use wb_model::{BoardId, Error, SectionTree};
 
 use crate::error::{Failure, Result, fail};
 
@@ -24,47 +22,9 @@ pub struct BoardRef {
     pub board: Board,
 }
 
-fn read_text(path: &Path) -> Result<Option<String>> {
-    match fs::read_to_string(path) {
-        Ok(text) => Ok(Some(text)),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(Failure::from(Error::Io {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })),
-    }
-}
-
-fn malformed(path: &Path) -> impl Fn(serde_json::Error) -> Failure {
-    move |error| {
-        Failure::from(Error::Malformed {
-            path: path.display().to_string(),
-            message: error.to_string(),
-        })
-    }
-}
-
 impl BoardRef {
-    pub fn name(&self) -> Result<String> {
-        let path = self.board.folder().join(BOARD_FILE);
-        let Some(text) = read_text(&path)? else {
-            return Err(Failure::from(Error::BoardNotFound {
-                board: self.id.clone(),
-            }));
-        };
-        Ok(BoardFile::parse(&text).map_err(malformed(&path))?.name)
-    }
-
-    pub fn config(&self) -> Result<BoardConfig> {
-        let path = self.board.folder().join(CONFIG_FILE);
-        match read_text(&path)? {
-            Some(text) => BoardConfig::parse(&text).map_err(malformed(&path)),
-            None => Ok(BoardConfig::default()),
-        }
-    }
-
     pub fn sections(&self) -> Result<SectionTree> {
-        Ok(SectionTree::from_config(&self.config()?))
+        Ok(SectionTree::from_config(&self.board.config()?))
     }
 }
 

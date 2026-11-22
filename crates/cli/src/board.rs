@@ -66,7 +66,7 @@ fn list(cx: &Context) -> Result<Vec<BoardRow>> {
         .into_iter()
         .map(|info| {
             let board = cx.board_named(info.id.as_str())?;
-            let config = board.config()?;
+            let config = board.board.config()?;
             Ok(BoardRow {
                 notes: board.board.snapshot()?.notes.len(),
                 id: info.id.to_string(),
@@ -139,7 +139,7 @@ fn show(cx: &Context, id: Option<&str>) -> Result<ShownBoard> {
         None => cx.board()?,
     };
     let files = board.board.notes()?;
-    let config = board.config()?;
+    let config = board.board.config()?;
     let sections = SectionTree::from_config(&config);
     let (_, unsectioned) = section::counts(&sections, &files);
     let mut tally: BTreeMap<String, usize> = BTreeMap::new();
@@ -171,7 +171,7 @@ fn show(cx: &Context, id: Option<&str>) -> Result<ShownBoard> {
         });
     Ok(ShownBoard {
         id: board.id.to_string(),
-        name: board.name()?,
+        name: board.board.info()?.name,
         path: board.board.folder().display().to_string(),
         notes: files.len(),
         unsectioned,

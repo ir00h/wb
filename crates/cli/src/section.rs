@@ -157,7 +157,7 @@ pub fn layout_text(layout: Option<&Value>) -> String {
 fn list(cx: &Context) -> Result<Vec<SectionRow>> {
     let board = cx.board()?;
     let notes = board.board.notes()?;
-    Ok(rows(&board.config()?, &notes))
+    Ok(rows(&board.board.config()?, &notes))
 }
 
 pub fn render_tree(rows: &[SectionRow]) -> String {
@@ -285,7 +285,7 @@ fn add(cx: &Context, request: NewSection) -> Result<AddedSection> {
 }
 
 fn name_taken(board: &BoardRef, name: &str, parent: Option<&SectionId>) -> Failure {
-    let Ok(config) = board.config() else {
+    let Ok(config) = board.board.config() else {
         return Failure(format!("there is already a section \"{name}\" there"));
     };
     let sections = SectionTree::from_config(&config);
