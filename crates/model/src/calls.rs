@@ -40,6 +40,14 @@ pub struct BoardUpdate {
     pub events: Vec<BoardEvent>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct BoardHealth {
+    pub board: BoardId,
+    pub problem: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -152,6 +160,7 @@ call_table! {
     }
     events {
         BOARD_EVENT = "board" (BoardUpdate);
+        BOARD_HEALTH_EVENT = "boardHealth" (BoardHealth);
         CLOSE_REQUESTED_EVENT = "closeRequested" (());
     }
 }

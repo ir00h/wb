@@ -5,8 +5,8 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 use wb_core::Workspace;
 use wb_model::{
-    ApplyOp, BOARD_EVENT, BoardId, BoardSnapshot, BoardUpdate, Boards, CallFailure, CloseAnswer,
-    Error, Handler, OpenBoard, Outcome, dispatch,
+    ApplyOp, BOARD_EVENT, BOARD_HEALTH_EVENT, BoardHealth, BoardId, BoardSnapshot, BoardUpdate,
+    Boards, CallFailure, CloseAnswer, Error, Handler, OpenBoard, Outcome, dispatch,
 };
 
 use crate::closing::Closing;
@@ -26,6 +26,10 @@ struct Window(AppHandle);
 impl Publish for Window {
     fn publish(&self, update: BoardUpdate) {
         let _ = self.0.emit(BOARD_EVENT, update);
+    }
+
+    fn health(&self, health: BoardHealth) {
+        let _ = self.0.emit(BOARD_HEALTH_EVENT, health);
     }
 }
 

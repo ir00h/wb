@@ -1,4 +1,5 @@
 import type { ApplyOp } from "./ApplyOp";
+import type { BoardHealth } from "./BoardHealth";
 import type { BoardSnapshot } from "./BoardSnapshot";
 import type { Boards } from "./Boards";
 import type { BoardUpdate } from "./BoardUpdate";
@@ -15,6 +16,7 @@ export type Calls = {
 
 export type Events = {
   board: BoardUpdate;
+  boardHealth: BoardHealth;
   closeRequested: null;
 };
 

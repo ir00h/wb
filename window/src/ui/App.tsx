@@ -26,7 +26,7 @@ function Body() {
     case "failed":
       return <p className="notice">{board.message}</p>;
     case "open":
-      return <Canvas snapshot={board.snapshot} />;
+      return <Canvas snapshot={board.snapshot} problem={board.problem} />;
     default:
       return unreachable(board);
   }

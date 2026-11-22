@@ -6,10 +6,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ts_rs::{Config, ExportError, TS};
 use wb_model::{
-    ApplyOp, BoardEvent, BoardId, BoardInfo, BoardSnapshot, BoardUpdate, Boards, BodyChange,
-    CallFailure, Change, CloseAnswer, DraftSection, Error, Invalid, NoteCard, NoteDraft, NoteEdit,
-    NoteId, Op, OpenBoard, Outcome, SectionId, SectionNode, SectionPath, SectionRef, TITLE_BAR,
-    Tag, TagHue,
+    ApplyOp, BoardEvent, BoardHealth, BoardId, BoardInfo, BoardSnapshot, BoardUpdate, Boards,
+    BodyChange, CallFailure, Change, CloseAnswer, DraftSection, Error, Invalid, NoteCard,
+    NoteDraft, NoteEdit, NoteId, Op, OpenBoard, Outcome, SectionId, SectionNode, SectionPath,
+    SectionRef, TITLE_BAR, Tag, TagHue,
 };
 
 use crate::finding;
@@ -51,6 +51,7 @@ fn export_every_type(config: &Config) -> Result<(), ExportError> {
     BoardUpdate::export_all(config)?;
     CallFailure::export_all(config)?;
     CloseAnswer::export_all(config)?;
+    BoardHealth::export_all(config)?;
     Ok(())
 }
 
@@ -86,6 +87,7 @@ fn crossing_types(config: &Config) -> BTreeMap<TypeId, String> {
         named::<Outcome>(config),
         named::<BoardUpdate>(config),
         named::<CloseAnswer>(config),
+        named::<BoardHealth>(config),
     ])
 }
 

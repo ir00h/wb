@@ -31,7 +31,24 @@ function Strays({ names }: { names: readonly string[] }) {
   );
 }
 
-export function Canvas({ snapshot }: { snapshot: BoardSnapshot }) {
+function BoardProblem({ problem }: { problem: string | null }) {
+  if (problem === null) {
+    return null;
+  }
+  return (
+    <div className="board-problem" role="alert" data-board-problem>
+      <b>This board cannot be read right now.</b> {problem} The cards shown are the last ones that
+      could be read, and they come back up to date by themselves.
+    </div>
+  );
+}
+
+type Props = {
+  readonly snapshot: BoardSnapshot;
+  readonly problem: string | null;
+};
+
+export function Canvas({ snapshot, problem }: Props) {
   const heights = useWindow((state) => state.heights);
   const view = useWindow((state) => state.view);
   const placed = useMemo(() => layout(snapshot, heights), [snapshot, heights]);
@@ -48,7 +65,11 @@ export function Canvas({ snapshot }: { snapshot: BoardSnapshot }) {
   };
 
   return (
-    <main className="canvas" onWheel={onWheel} onDoubleClick={onDoubleClick}>
+    <main
+      className={problem === null ? "canvas" : "canvas stale"}
+      onWheel={onWheel}
+      onDoubleClick={onDoubleClick}
+    >
       <div
         className="dots"
         style={{ transform: `translate(${dotShift(view.x)}px, ${dotShift(view.y)}px)` }}
@@ -65,6 +86,7 @@ export function Canvas({ snapshot }: { snapshot: BoardSnapshot }) {
         })}
       </div>
       <Strays names={snapshot.strays} />
+      <BoardProblem problem={problem} />
     </main>
   );
 }

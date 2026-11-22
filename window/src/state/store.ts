@@ -30,10 +30,15 @@ const UNSAVED_ON_CLOSE = "Whiteboard did not quit, because typed text could not 
 const NO_ANSWER_ON_CLOSE = "Whiteboard did not quit, because a save got no answer in time.";
 
 type BoardUpdate = Events["board"];
+type BoardHealth = Events["boardHealth"];
 
 export type BoardState =
   | { readonly kind: "opening" }
-  | { readonly kind: "open"; readonly snapshot: BoardSnapshot }
+  | {
+      readonly kind: "open";
+      readonly snapshot: BoardSnapshot;
+      readonly problem: string | null;
+    }
   | { readonly kind: "failed"; readonly message: string }
   | { readonly kind: "preview" };
 
@@ -89,11 +94,11 @@ function showNotice(text: string): void {
 }
 
 function applyUpdate(update: BoardUpdate): void {
-  const snapshot = openSnapshot();
-  if (snapshot === null || snapshot.board.id !== update.board) {
+  const board = useWindow.getState().board;
+  if (board.kind !== "open" || board.snapshot.board.id !== update.board) {
     return;
   }
-  useWindow.setState({ board: { kind: "open", snapshot: applyEvents(snapshot, update.events) } });
+  useWindow.setState({ board: { ...board, snapshot: applyEvents(board.snapshot, update.events) } });
   for (const event of update.events) {
     switch (event.type) {
       case "noteChanged":
@@ -110,6 +115,13 @@ function applyUpdate(update: BoardUpdate): void {
       default:
         unreachable(event);
     }
+  }
+}
+
+function applyHealth(health: BoardHealth): void {
+  const board = useWindow.getState().board;
+  if (board.kind === "open" && board.snapshot.board.id === health.board) {
+    useWindow.setState({ board: { ...board, problem: health.problem } });
   }
 }
 
@@ -322,6 +334,7 @@ export async function start(): Promise<void> {
   }
   const early: BoardUpdate[] = [];
   let opened = false;
+  listen("boardHealth", applyHealth);
   listen("closeRequested", () => {
     void answerClose();
   });
@@ -340,7 +353,9 @@ export async function start(): Promise<void> {
         .filter((update) => update.board === snapshot.board.id)
         .flatMap((update) => update.events);
       input({ type: "boardReplaced" });
-      useWindow.setState({ board: { kind: "open", snapshot: applyEvents(snapshot, events) } });
+      useWindow.setState({
+        board: { kind: "open", snapshot: applyEvents(snapshot, events), problem: null },
+      });
       opened = true;
       break;
     }

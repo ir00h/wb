@@ -1,4 +1,5 @@
 import type { Journey } from "./driver.ts";
+import { boardFolder } from "./journeys/board-folder.ts";
 import { cardsInSections } from "./journeys/cards-in-sections.ts";
 import { conflictKeepMine, conflictTakeTheirs } from "./journeys/conflict.ts";
 import { editOneOperation } from "./journeys/edit-one-operation.ts";
@@ -12,6 +13,7 @@ export const JOURNEYS: readonly Journey[] = [
   cardsInSections,
   editOneOperation,
   outsideChanges,
+  boardFolder,
   conflictTakeTheirs,
   conflictKeepMine,
   quitKeepsTypedText,
