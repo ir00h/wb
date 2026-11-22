@@ -295,28 +295,55 @@ Rules: none; `wb rules init` writes a first version
 fn board_show_names_a_default_or_archive_section_the_config_lacks_as_missing() {
     let scratch = Scratch::new("board-show-missing-default");
     scratch.wb(&["board", "add", "garden"]).ok();
-    fs::write(
-        scratch.workspace().join("garden/board.config.json"),
-        "{\"sections\": [{\"id\": \"sbeds00\", \"name\": \"Beds\"}], \"defaultSection\": \"sgone01\", \"archiveSection\": \"sbeds00\"}",
-    )
-    .expect("config written");
-    let text = scratch.wb(&["--board", "garden", "board", "show"]).ok();
-    assert!(
-        text.stdout
-            .contains("\nDefault section: sgone01 (missing)\nArchive section: Beds\n"),
-        "{}",
-        text.stdout
-    );
-    let json = scratch
-        .wb(&["--board", "garden", "board", "show", "--json"])
-        .ok()
-        .json();
-    assert_eq!(
-        (&json["defaultSection"], &json["archiveSection"]),
-        (
-            &serde_json::json!("sgone01 (missing)"),
-            &serde_json::json!("Beds")
+    let shown = |default: &str, archive: &str| {
+        fs::write(
+            scratch.workspace().join("garden/board.config.json"),
+            serde_json::json!({
+                "sections": [{"id": "sbeds00", "name": "Beds"}],
+                "defaultSection": default,
+                "archiveSection": archive,
+            })
+            .to_string(),
         )
+        .expect("config written");
+        let text = scratch.wb(&["--board", "garden", "board", "show"]).ok();
+        let json = scratch
+            .wb(&["--board", "garden", "board", "show", "--json"])
+            .ok()
+            .json();
+        let lines: Vec<String> = text
+            .stdout
+            .lines()
+            .filter(|line| line.contains(" section: "))
+            .map(str::to_owned)
+            .collect();
+        (
+            lines,
+            json["defaultSection"].clone(),
+            json["archiveSection"].clone(),
+        )
+    };
+    let expected = |default: &str, archive: &str| {
+        (
+            vec![
+                format!("Default section: {default}"),
+                format!("Archive section: {archive}"),
+            ],
+            serde_json::json!(default),
+            serde_json::json!(archive),
+        )
+    };
+    assert_eq!(
+        shown("sgone01", "sbeds00"),
+        expected("sgone01 (missing)", "Beds")
+    );
+    assert_eq!(
+        shown("sbeds00", "sgone02"),
+        expected("Beds", "sgone02 (missing)")
+    );
+    assert_eq!(
+        shown("Old beds", "sbeds00"),
+        expected("Old beds (missing)", "Beds")
     );
 }
 
