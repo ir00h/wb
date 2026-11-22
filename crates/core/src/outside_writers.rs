@@ -581,6 +581,26 @@ fn a_folder_put_in_place_of_a_note_at_the_last_moment_gets_nothing_and_blocks_no
 }
 
 #[test]
+fn a_new_board_never_takes_a_folder_whose_board_file_another_program_wrote_first() {
+    let garden = Garden::new("board-file-written-first");
+    let workspace = Workspace::open(&garden.root).expect("workspace");
+    let theirs = "{\"name\":\"Kitchen\"}\n";
+
+    at_the_next(Moment::BeforeTheCreation, move |board_file| {
+        fs::write(board_file, theirs).expect("board file written by another program");
+    });
+    let added = workspace.add_board("Kitchen", None).expect("board");
+
+    assert_eq!(added.id.as_str(), "kitchen-2");
+    assert_eq!(
+        fs::read_to_string(garden.root.join("kitchen/board.json")).expect("their board file"),
+        theirs,
+        "the new board was written over a board file another program wrote"
+    );
+    assert!(garden.root.join("kitchen-2/board.json").is_file());
+}
+
+#[test]
 fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
     if std::env::var_os(VOLUME).is_some() {
         return;

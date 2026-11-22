@@ -7,8 +7,8 @@ use wb_model::{BOARD_FILE, BoardFile, BoardId, BoardInfo, Error, Invalid, slug, 
 
 use crate::board::{Board, read_board_file};
 use crate::failure::{io_failure, lock_failure, malformed};
-use crate::lock::{BoardLocks, LockKey};
-use crate::replace::{Target, create_new};
+use crate::lock::{BoardLocks, LOCKS_FOLDER, LockKey};
+use crate::replace::{Created, Target, create_new};
 use crate::volume::Volume;
 
 pub const DEFAULT_LOCK_DEADLINE: Duration = Duration::from_secs(10);
@@ -95,18 +95,53 @@ impl Workspace {
             }
             None => self.root.clone(),
         };
-        let (folder_name, folder) = create_free_folder(&parent_folder, &name)?;
-        let path = folder.join(BOARD_FILE);
-        let text = BoardFile::new(&name).render().map_err(malformed(&path))?;
-        let held = BoardLocks::on_volume(&folder, self.volume)
-            .acquire(&[LockKey::Config], self.lock_deadline)
-            .map_err(lock_failure(&folder, "the new board"))?;
-        create_new(&held, Target::BoardFile, text.as_bytes()).map_err(io_failure(&path))?;
+        let text = BoardFile::new(&name)
+            .render()
+            .map_err(malformed(&parent_folder.join(BOARD_FILE)))?;
+        let (folder_name, folder) = self.create_free_board(&parent_folder, &name, &text)?;
         let id = child_id(parent, &folder_name).ok_or_else(|| Error::Io {
             path: folder.display().to_string(),
             message: "the new folder name is not a board id".to_owned(),
         })?;
         Ok(BoardInfo { id, name })
+    }
+
+    fn create_free_board(
+        &self,
+        parent: &Path,
+        name: &str,
+        text: &str,
+    ) -> Result<(String, PathBuf), Error> {
+        let base = Some(slug(name))
+            .filter(|base| !base.is_empty() && !RESERVED_FOLDERS.contains(&base.as_str()))
+            .unwrap_or_else(|| FALLBACK_FOLDER.to_owned());
+        let mut attempt = 0_u32;
+        loop {
+            attempt += 1;
+            let candidate = if attempt == 1 {
+                base.clone()
+            } else {
+                format!("{base}-{attempt}")
+            };
+            let folder = parent.join(&candidate);
+            match fs::create_dir(&folder) {
+                Ok(()) => {}
+                Err(error)
+                    if error.kind() == ErrorKind::AlreadyExists && holds_only_locks(&folder)? => {}
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(io_failure(&folder)(error)),
+            }
+            let held = BoardLocks::on_volume(&folder, self.volume)
+                .acquire(&[LockKey::Config], self.lock_deadline)
+                .map_err(lock_failure(&folder, "the new board"))?;
+            let path = folder.join(BOARD_FILE);
+            match create_new(&held, Target::BoardFile, text.as_bytes())
+                .map_err(io_failure(&path))?
+            {
+                Created::Done => return Ok((candidate, folder)),
+                Created::Exists => {}
+            }
+        }
     }
 
     fn folder_of(&self, id: &BoardId) -> PathBuf {
@@ -124,24 +159,18 @@ fn child_id(parent: Option<&BoardId>, folder_name: &str) -> Option<BoardId> {
     BoardId::parse(&id).ok()
 }
 
-fn create_free_folder(parent: &Path, name: &str) -> Result<(String, PathBuf), Error> {
-    let base = Some(slug(name))
-        .filter(|base| !base.is_empty() && !RESERVED_FOLDERS.contains(&base.as_str()))
-        .unwrap_or_else(|| FALLBACK_FOLDER.to_owned());
-    let mut attempt = 1_u32;
-    loop {
-        let candidate = if attempt == 1 {
-            base.clone()
-        } else {
-            format!("{base}-{attempt}")
-        };
-        let folder = parent.join(&candidate);
-        match fs::create_dir(&folder) {
-            Ok(()) => return Ok((candidate, folder)),
-            Err(error) if error.kind() == ErrorKind::AlreadyExists => attempt += 1,
-            Err(error) => return Err(io_failure(&folder)(error)),
+fn holds_only_locks(folder: &Path) -> Result<bool, Error> {
+    let entries = match fs::read_dir(folder) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == ErrorKind::NotADirectory => return Ok(false),
+        Err(error) => return Err(io_failure(folder)(error)),
+    };
+    for entry in entries {
+        if entry.map_err(io_failure(folder))?.file_name() != LOCKS_FOLDER {
+            return Ok(false);
         }
     }
+    Ok(true)
 }
 
 fn collect_boards(

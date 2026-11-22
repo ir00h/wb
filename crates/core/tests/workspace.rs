@@ -411,3 +411,51 @@ fn an_edit_of_an_id_no_file_holds_leaves_nothing_behind() {
     );
     assert!(!scratch.path().join("garden/.locks/n99.lock").exists());
 }
+
+#[test]
+fn a_board_whose_creation_was_cut_short_is_no_board_and_its_name_is_free_again() {
+    let scratch = Scratch::new("cut-short");
+    let locks = scratch.path().join("garden/.locks");
+    fs::create_dir_all(&locks).expect("locks folder");
+    fs::write(locks.join("board.config.lock"), "").expect("lock file");
+    fs::write(
+        locks.join("board.config.tmp"),
+        "{\n  \"version\": 2,\n  \"na",
+    )
+    .expect("half a board file");
+    let workspace = scratch.workspace();
+
+    assert_eq!(workspace.boards().expect("boards"), Vec::new());
+    assert_eq!(
+        workspace
+            .board(&board_id("garden"))
+            .map(|board| board.id().clone()),
+        Err(Error::BoardNotFound {
+            board: board_id("garden")
+        })
+    );
+    let garden = workspace.add_board("Garden", None).expect("board");
+
+    assert_eq!(garden.id, board_id("garden"));
+    assert_eq!(
+        workspace
+            .board(&garden.id)
+            .expect("board")
+            .snapshot()
+            .expect("snapshot")
+            .board
+            .name,
+        "Garden"
+    );
+    let left: Vec<_> = fs::read_dir(&locks)
+        .expect("locks folder")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert_eq!(left, ["board.config.lock"]);
+}
