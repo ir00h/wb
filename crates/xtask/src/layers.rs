@@ -49,6 +49,7 @@ const LAYERS: &[Layer] = &[
         normal: &[
             "block2",
             "objc2",
+            "notify",
             "objc2-foundation",
             "rustix",
             "serde",

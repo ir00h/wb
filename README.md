@@ -23,8 +23,10 @@ You need Rust (the version in `rust-toolchain.toml` is installed on first use), 
 ```sh
 pnpm install
 cargo build --workspace
-pnpm tauri dev
+pnpm tauri dev -- -- --workspace <folder>
 ```
+
+The app shows one board of a workspace folder. Name the folder with `--workspace <folder>` or `WHITEBOARD_WORKSPACE`, and the board with `--board <board>` or `WB_BOARD`; without a board it opens the first one. It watches the board's folder and shows changes other programs make.
 
 `pnpm tauri build --debug` builds the app bundle under `target/debug/bundle`.
 
@@ -47,6 +49,7 @@ With the feature on, setting `WB_AUTOMATION_PORT` makes the shell listen on `127
 | `POST /evaluate` | runs the request body as the body of an async function in the web view and returns its value as JSON; status 422 with the error when it throws |
 | `GET /snapshot`  | returns a PNG of the web view                                                                                                                  |
 | `GET /window`    | returns the title, size, scale, window number, whether the window is visible and whether background mode is on                                 |
+| `GET /applied`   | returns how many operations the shell has applied, by kind and note                                                                            |
 | `POST /quit`     | quits the app                                                                                                                                  |
 
 `WB_AUTOMATION_BACKGROUND=1` keeps the app from ever becoming the frontmost app and keeps the page rendering while the window is hidden behind others (macOS only). It needs `WB_AUTOMATION_PORT` too; without it the app refuses to start rather than start in the foreground. When the system's web view cannot keep a hidden window rendering, the app says why and exits instead of announcing the channel. With the channel on, the app exits by itself when the program whose process id is in `WB_AUTOMATION_RUNNER` ends, or, without that variable, the program that started it; the journey runner passes its own, so an app started through a wrapper still ends with the run. Journeys run in background mode; `WB_E2E_FOREGROUND=1` turns it off, as continuous integration does. `shell-default-clean` fails when the default shell binary contains any part of the channel.

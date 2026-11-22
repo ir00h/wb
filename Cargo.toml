@@ -17,6 +17,7 @@ serde = { version = "1", default-features = false, features = ["alloc", "derive"
 tauri = "2.12"
 tauri-build = "2"
 tiny_http = "0.12"
+notify = { version = "8", default-features = false, features = ["macos_fsevent"] }
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false }
 block2 = "0.6"

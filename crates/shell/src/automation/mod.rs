@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::time::Duration;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::webview::PageLoadEvent;
 use tauri::{App, Builder, Manager, State, WebviewWindow, WebviewWindowBuilder, Wry};
 use tiny_http::{Header, Method, Request, Response, Server};
+use wb_model::Op;
 
 const PORT_VARIABLE: &str = "WB_AUTOMATION_PORT";
 const BACKGROUND_VARIABLE: &str = "WB_AUTOMATION_BACKGROUND";
@@ -19,9 +20,68 @@ const RUNNER_VARIABLE: &str = "WB_AUTOMATION_RUNNER";
 const LISTENING_ANNOUNCEMENT: &str = "AUTOMATION_LISTENING";
 const SETTLE_COMMAND: &str = "settle_evaluation";
 const EVALUATION_TIMEOUT: Duration = Duration::from_secs(10);
-const ROUTES: &str = "POST /evaluate, GET /snapshot, GET /window, POST /quit";
+const ROUTES: &str = "POST /evaluate, GET /snapshot, GET /window, GET /applied, POST /quit";
 #[cfg(unix)]
 const RUNNER_POLL: Duration = Duration::from_millis(200);
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Applied {
+    kind: &'static str,
+    note: Option<String>,
+}
+
+#[derive(Serialize)]
+struct AppliedCount {
+    #[serde(flatten)]
+    applied: Applied,
+    count: u32,
+}
+
+static APPLIED: Mutex<Vec<(Applied, u32)>> = Mutex::new(Vec::new());
+
+impl Applied {
+    pub fn of(op: &Op) -> Applied {
+        match op {
+            Op::AddSection { .. } => Applied {
+                kind: "addSection",
+                note: None,
+            },
+            Op::AddNote { .. } => Applied {
+                kind: "addNote",
+                note: None,
+            },
+            Op::EditNote { note, .. } => Applied {
+                kind: "editNote",
+                note: Some(note.to_string()),
+            },
+        }
+    }
+
+    pub fn record(self) {
+        let mut counts = APPLIED.lock().unwrap_or_else(PoisonError::into_inner);
+        match counts.iter_mut().find(|(applied, _)| *applied == self) {
+            Some((_, count)) => *count += 1,
+            None => counts.push((self, 1)),
+        }
+    }
+}
+
+fn applied_counts() -> Reply {
+    let counts: Vec<AppliedCount> = APPLIED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .iter()
+        .map(|(applied, count)| AppliedCount {
+            applied: applied.clone(),
+            count: *count,
+        })
+        .collect();
+    match serde_json::to_string(&counts) {
+        Ok(json) => Reply::Json(json),
+        Err(error) => Reply::Failed(error.to_string()),
+    }
+}
 
 #[derive(Clone)]
 pub struct Automation {
@@ -312,6 +372,7 @@ enum Route {
     Evaluate,
     Snapshot,
     Window,
+    Applied,
     Quit,
 }
 
@@ -321,6 +382,7 @@ impl Route {
             (Method::Post, "/evaluate") => Some(Route::Evaluate),
             (Method::Get, "/snapshot") => Some(Route::Snapshot),
             (Method::Get, "/window") => Some(Route::Window),
+            (Method::Get, "/applied") => Some(Route::Applied),
             (Method::Post, "/quit") => Some(Route::Quit),
             _ => None,
         }
@@ -338,6 +400,7 @@ fn serve(server: &Server, window: &WebviewWindow, background: bool) {
                 },
                 Some(Route::Snapshot) => snapshot(window),
                 Some(Route::Window) => window_facts(window, background),
+                Some(Route::Applied) => applied_counts(),
                 Some(Route::Quit) => {
                     let _ = request.respond(Reply::Json("null".to_owned()).into_response());
                     window.app_handle().exit(0);
