@@ -5,7 +5,7 @@ import { cardsShown, eventually, launchGarden } from "../board-page.ts";
 import type { Journey, RunningApp } from "../driver.ts";
 import { addNote, BOARD } from "../garden.ts";
 
-const RECHECK_WAIT_MS = 5_000;
+const LINK_WAIT_MS = 5_000;
 const EVENT_WAIT_MS = 1_500;
 const BUSY_WRITE_MS = 60;
 const FIXED_TIME = new Date("2026-04-01T08:00:00Z");
@@ -63,9 +63,9 @@ export const boardFolder: Journey = {
         async () =>
           (await cardBody(app, garden.notes.plants)) ===
           "Changed through another name of the file.",
-        RECHECK_WAIT_MS,
+        LINK_WAIT_MS,
       ),
-      "a change the watcher did not report was not caught by the recheck",
+      "a change written through another name of the note's file was not shown",
     );
 
     const plantPath = join(board, plantFile);

@@ -228,9 +228,9 @@ mod tests {
                 .clone()
         }
 
-        fn wait_for(&self, wanted: &str) -> Vec<String> {
+        fn wait_for(&self, count: usize) -> Vec<String> {
             let deadline = Instant::now() + RECHECK * 2 + Duration::from_secs(1);
-            while Instant::now() < deadline && !self.seen().iter().any(|seen| seen == wanted) {
+            while Instant::now() < deadline && self.seen().len() < count {
                 std::thread::sleep(Duration::from_millis(50));
             }
             self.seen()
@@ -250,10 +250,16 @@ mod tests {
         fn health(&self, health: BoardHealth) {
             let mut seen = self.0.lock().unwrap_or_else(PoisonError::into_inner);
             seen.push(match health.problem {
-                Some(_) => "unreadable".to_owned(),
+                Some(problem) => format!("unreadable: {problem}"),
                 None => "readable".to_owned(),
             });
         }
+    }
+
+    fn fingerprint_unchanged(watched: &Mutex<Option<Watched>>) -> bool {
+        let watched = watched.lock().unwrap_or_else(PoisonError::into_inner);
+        let watched = watched.as_ref().expect("a board is watched");
+        fingerprint(&watched.folder) == watched.seen
     }
 
     fn scratch_workspace() -> PathBuf {
@@ -295,17 +301,34 @@ mod tests {
             "---\nid: n1\n---\n\n# Plant list\n\nTomatoes.\n",
         )
         .expect("note written");
-        assert_eq!(recorder.wait_for("note Plant list"), ["note Plant list"]);
+        assert_eq!(recorder.wait_for(1), ["note Plant list"]);
 
         let config = folder.join("board.config.json");
         std::fs::write(&config, "{ not json").expect("config broken");
-        recorder.wait_for("unreadable");
+        let seen = recorder.wait_for(2);
+        assert_eq!(seen.len(), 2, "{seen:?}");
+        assert!(seen[1].starts_with("unreadable: "), "{seen:?}");
+
+        std::fs::write(&config, "[]").expect("config broken another way");
+        let seen = recorder.wait_for(3);
+        assert_eq!(seen.len(), 3, "a second cause was not published: {seen:?}");
+        assert!(seen[2].starts_with("unreadable: "), "{seen:?}");
+        assert_ne!(seen[1], seen[2]);
+
+        let broken_at = std::fs::metadata(&config)
+            .and_then(|metadata| metadata.modified())
+            .expect("config time");
         std::thread::sleep(RECHECK + Duration::from_millis(500));
-        std::fs::remove_file(&config).expect("config removed");
-        assert_eq!(
-            recorder.wait_for("readable"),
-            ["note Plant list", "unreadable", "readable"]
-        );
+        let repair = folder.join("board.config.tmp");
+        std::fs::write(&repair, "{}").expect("repair written");
+        std::fs::File::options()
+            .write(true)
+            .open(&repair)
+            .and_then(|file| file.set_modified(broken_at))
+            .expect("config time kept");
+        std::fs::rename(&repair, &config).expect("config repaired");
+        assert!(fingerprint_unchanged(&watched));
+        assert_eq!(recorder.wait_for(4)[3..], ["readable"]);
 
         drop(quiet);
         following.join().expect("follow ends");
