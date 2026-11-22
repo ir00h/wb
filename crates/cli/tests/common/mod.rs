@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::fs;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -97,6 +98,38 @@ impl Scratch {
         let mut files = BTreeMap::new();
         collect(&self.workspace(), &self.workspace(), &mut files);
         files
+    }
+
+    pub fn fingerprint(&self, relative: &str) -> (Vec<String>, u64) {
+        let mut entries = Vec::new();
+        let mut hasher = DefaultHasher::new();
+        let root = self.workspace().join(relative);
+        let mut folders = vec![root.clone()];
+        while let Some(folder) = folders.pop() {
+            let mut paths: Vec<PathBuf> = fs::read_dir(&folder)
+                .expect("a folder of the board")
+                .map(|entry| entry.expect("an entry").path())
+                .collect();
+            paths.sort();
+            for path in paths {
+                let name = path
+                    .strip_prefix(&root)
+                    .expect("inside the board")
+                    .display()
+                    .to_string();
+                if path.is_dir() {
+                    entries.push(format!("{name}/"));
+                    folders.push(path);
+                } else {
+                    let bytes = fs::read(&path).expect("a file of the board");
+                    name.hash(&mut hasher);
+                    bytes.hash(&mut hasher);
+                    entries.push(name);
+                }
+            }
+        }
+        entries.sort();
+        (entries, hasher.finish())
     }
 
     pub fn read(&self, relative: &str) -> String {

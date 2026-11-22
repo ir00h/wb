@@ -671,6 +671,36 @@ fn note_edit_refuses_nothing_to_change_and_a_missing_note() {
 }
 
 #[test]
+fn note_edit_of_an_id_no_note_has_leaves_the_board_as_it_was() {
+    let garden = Garden::new("note-edit-unknown");
+    let id = plant_list(&garden);
+    garden
+        .wb(&["note", "edit", &id, "--append", "--body", "Add peas."])
+        .ok();
+    let before = garden.scratch.fingerprint("garden");
+    assert!(
+        before.0.iter().any(|entry| entry.starts_with(".locks/")),
+        "{:?}",
+        before.0
+    );
+    for unknown in ["n99", "nzzzzzz"] {
+        for args in [
+            vec!["note", "edit", unknown, "--title", "X"],
+            vec!["note", "edit", unknown, "--append", "--body", "x"],
+            vec!["note", "edit", unknown, "--body", "x"],
+        ] {
+            let run = garden.wb(&args);
+            assert_eq!(run.code, 1, "{args:?}");
+            assert_eq!(
+                garden.scratch.fingerprint("garden"),
+                before,
+                "the edit of {unknown} changed the board folder"
+            );
+        }
+    }
+}
+
+#[test]
 fn note_edit_reaches_a_note_on_another_board() {
     let garden = Garden::new("note-edit-other");
     let id = plant_list(&garden);
