@@ -51,6 +51,16 @@ export const cardsInSections: Journey = {
       "the body is not rendered as Markdown paragraphs",
     );
     assert.match(byId.get(notes.swap)?.html ?? "", /<strong>beans<\/strong>/);
+    assert.doesNotMatch(
+      byId.get(notes.swap)?.html ?? "",
+      /<img/,
+      "raw HTML in a note's body is drawn as HTML",
+    );
+    assert.equal(
+      await app.evaluate(() => "__ran" in window),
+      false,
+      "a script in a note's body ran in the window",
+    );
     const peas = byId.get(notes.peas)?.html ?? "";
     assert.match(
       peas,

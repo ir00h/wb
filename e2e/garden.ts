@@ -124,7 +124,7 @@ export async function plantGarden(workspace: string): Promise<Garden> {
     "Seed swap list",
     "none",
     ["done"],
-    "Seeds to bring: **beans** and peas.",
+    'Seeds to bring: **beans** and peas.\n\n<img src="x" onerror="window.__ran = true">',
   );
   return {
     workspace,
