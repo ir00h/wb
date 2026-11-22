@@ -14,6 +14,7 @@ use crate::section_path::{SectionPath, same_section_name};
 pub struct SectionNode {
     pub id: SectionId,
     pub name: String,
+    pub note: String,
     pub hue: Option<f64>,
     pub children: Vec<SectionNode>,
 }
@@ -43,6 +44,7 @@ impl fmt::Display for SectionRef {
 struct Section {
     id: SectionId,
     name: String,
+    note: String,
     parent: Option<SectionId>,
     hue: Option<f64>,
 }
@@ -66,6 +68,7 @@ impl SectionTree {
             listed.push(Section {
                 id,
                 name: entry.name.clone(),
+                note: entry.note.clone(),
                 parent: entry
                     .parent
                     .as_deref()
@@ -135,6 +138,7 @@ impl SectionTree {
             .map(|section| SectionNode {
                 id: section.id.clone(),
                 name: section.name.clone(),
+                note: section.note.clone(),
                 hue: section.hue,
                 children: self.nodes_inside(Some(&section.id)),
             })

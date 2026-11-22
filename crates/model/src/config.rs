@@ -8,7 +8,9 @@ use serde_json::{Map, Number, Value};
 use crate::error::Invalid;
 use crate::id::SectionId;
 use crate::section_path::{same_section_name, section_name};
+use crate::tag::Tag;
 use crate::text;
+use crate::wire::TagHue;
 
 pub const CONFIG_FILE: &str = "board.config.json";
 pub const CONFIG_VERSION: u32 = 1;
@@ -107,6 +109,23 @@ impl BoardConfig {
         let mut text = serde_json::to_string_pretty(self)?;
         text.push('\n');
         Ok(text)
+    }
+
+    #[must_use]
+    pub fn tag_hues(&self) -> Vec<TagHue> {
+        let mut hues: Vec<TagHue> = Vec::new();
+        for entry in self.tags.as_deref().unwrap_or_default() {
+            let (Some(tag), Some(hue)) = (
+                Tag::new(&entry.name),
+                entry.hue.as_ref().and_then(Number::as_f64),
+            ) else {
+                continue;
+            };
+            if !hues.iter().any(|known| known.tag == tag) {
+                hues.push(TagHue { tag, hue });
+            }
+        }
+        hues
     }
 
     #[must_use]

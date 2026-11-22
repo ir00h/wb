@@ -14,7 +14,7 @@ use crate::sections::SectionRef;
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
-#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(rename = "CoreError"))]
 pub enum Error {
     #[error("the workspace folder `{path}` does not exist")]
     WorkspaceNotFound { path: String },
@@ -45,6 +45,10 @@ pub enum Error {
     Malformed { path: String, message: String },
     #[error("`{path}`: {message}")]
     Io { path: String, message: String },
+    #[error("the window called `{call}` in a way the app does not understand: {message}")]
+    BadCall { call: String, message: String },
+    #[error("this workspace has no board yet; make one with `wb board add`")]
+    NoBoardToOpen,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error, Serialize, Deserialize)]

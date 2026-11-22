@@ -67,11 +67,13 @@ impl Board {
 
     pub fn snapshot(&self) -> Result<BoardSnapshot, Error> {
         let board = self.info()?;
-        let sections = self.sections()?;
+        let config = self.config()?;
+        let sections = SectionTree::from_config(&config);
         let scan = folder::scan(&self.folder)?;
         Ok(BoardSnapshot {
             board,
             sections: sections.nodes(),
+            tags: config.tag_hues(),
             notes: scan
                 .notes
                 .iter()
@@ -165,14 +167,15 @@ impl Board {
             config
                 .add_section(&id, name, parent.as_ref(), note, hue)
                 .map_err(|problem| Error::Invalid { problem })?;
-            let name = config
+            let (name, note) = config
                 .section_entries()
                 .last()
-                .map(|entry| entry.name.clone())
+                .map(|entry| (entry.name.clone(), entry.note.clone()))
                 .unwrap_or_default();
             Ok(SectionNode {
                 id,
                 name,
+                note,
                 hue,
                 children: Vec::new(),
             })

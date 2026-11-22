@@ -3,6 +3,7 @@
 extern crate alloc;
 
 mod board_file;
+mod calls;
 mod config;
 mod edit;
 mod error;
@@ -15,6 +16,10 @@ pub mod text;
 mod wire;
 
 pub use board_file::{BOARD_FILE, BOARD_FORMAT_VERSION, BoardFile};
+pub use calls::{
+    ApplyOp, BOARD_EVENT, BoardEventPayload, BoardUpdate, Boards, CALLS, CallFailure, CallShape,
+    Handler, OpenBoard, TITLE_BAR, TitleBar, call_shapes, dispatch, event_shape,
+};
 pub use config::{
     BoardConfig, CONFIG_FILE, CONFIG_VERSION, HUE_MAX, HUE_MIN, SectionEntry, TagColour,
 };
@@ -32,5 +37,5 @@ pub use sections::{SectionNode, SectionRef, SectionTree};
 pub use tag::{EmptyTag, Tag};
 pub use wire::{
     BoardEvent, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, NoteCard, NoteDraft,
-    NoteEdit, Op, Outcome, diff,
+    NoteEdit, Op, Outcome, TagHue, diff,
 };

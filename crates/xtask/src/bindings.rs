@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -5,9 +6,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use ts_rs::{Config, ExportError, TS};
 use wb_model::{
-    BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, Error,
-    Invalid, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, SectionId, SectionNode,
-    SectionPath, SectionRef, Tag,
+    ApplyOp, BoardEvent, BoardId, BoardInfo, BoardSnapshot, BoardUpdate, Boards, BodyChange,
+    CallFailure, Change, DraftSection, Error, Invalid, NoteCard, NoteDraft, NoteEdit, NoteId, Op,
+    OpenBoard, Outcome, SectionId, SectionNode, SectionPath, SectionRef, TITLE_BAR, Tag, TagHue,
 };
 
 use crate::finding;
@@ -40,9 +41,106 @@ fn export_every_type(config: &Config) -> Result<(), ExportError> {
     Op::export_all(config)?;
     Outcome::export_all(config)?;
     BoardEvent::export_all(config)?;
+    TagHue::export_all(config)?;
     Invalid::export_all(config)?;
     Error::export_all(config)?;
+    Boards::export_all(config)?;
+    OpenBoard::export_all(config)?;
+    ApplyOp::export_all(config)?;
+    BoardUpdate::export_all(config)?;
+    CallFailure::export_all(config)?;
     Ok(())
+}
+
+const CALLS_FILE: &str = "Calls.ts";
+
+fn variant_tags(union: &str) -> Vec<String> {
+    union
+        .split("\"type\": \"")
+        .skip(1)
+        .filter_map(|rest| rest.split('"').next())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn quoted(items: &[String]) -> String {
+    items
+        .iter()
+        .map(|item| format!("\"{item}\""))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn crossing_types(config: &Config) -> BTreeMap<TypeId, String> {
+    fn named<T: TS + 'static>(config: &Config) -> (TypeId, String) {
+        (TypeId::of::<T>(), T::name(config))
+    }
+    BTreeMap::from([
+        (TypeId::of::<()>(), "null".to_owned()),
+        named::<Boards>(config),
+        named::<OpenBoard>(config),
+        named::<BoardSnapshot>(config),
+        named::<ApplyOp>(config),
+        named::<Outcome>(config),
+        named::<BoardUpdate>(config),
+    ])
+}
+
+fn ts_name(types: &BTreeMap<TypeId, String>, call: &str, id: TypeId) -> Result<String, String> {
+    types.get(&id).cloned().ok_or_else(|| {
+        format!(
+            "the call `{call}` of the call table uses a type that crossing_types in crates/xtask/src/bindings.rs does not name; add it there and to export_every_type"
+        )
+    })
+}
+
+fn import_order(name: &str) -> Vec<(char, bool)> {
+    name.chars()
+        .map(|letter| (letter.to_ascii_lowercase(), letter.is_ascii_lowercase()))
+        .collect()
+}
+
+fn calls_file(config: &Config) -> Result<String, String> {
+    let types = crossing_types(config);
+    let mut imports = BTreeSet::new();
+    let mut entries = Vec::new();
+    for shape in wb_model::call_shapes() {
+        let args = ts_name(&types, shape.name, shape.args)?;
+        let reply = ts_name(&types, shape.name, shape.reply)?;
+        entries.push(format!(
+            "  {}: {{ args: {args}, reply: {reply} }};",
+            shape.name
+        ));
+        imports.extend([args, reply]);
+    }
+    let event = wb_model::event_shape();
+    let payload = ts_name(&types, event.name, event.args)?;
+    imports.insert(payload.clone());
+    imports.remove("null");
+    let mut imports: Vec<String> = imports.into_iter().collect();
+    imports.sort_by_key(|name| import_order(name));
+    let mut lines: Vec<String> = imports
+        .iter()
+        .map(|name| format!("import type {{ {name} }} from \"./{name}\";"))
+        .collect();
+    lines.push(String::new());
+    lines.push("export type Calls = {".to_owned());
+    lines.extend(entries);
+    lines.push("};".to_owned());
+    lines.push(String::new());
+    lines.push(format!("export const BOARD_EVENT = \"{}\";", event.name));
+    lines.push(format!("export type BoardEventPayload = {payload};"));
+    lines.push(String::new());
+    lines.push(format!(
+        "export const ERROR_TYPES = [{}] as const;",
+        quoted(&variant_tags(&Error::inline(config)))
+    ));
+    lines.push(String::new());
+    lines.push(format!(
+        "export const TITLE_BAR = {{ height: {}, buttonsX: {}, buttonsY: {}, contentInset: {} }} as const;",
+        TITLE_BAR.height, TITLE_BAR.buttons_x, TITLE_BAR.buttons_y, TITLE_BAR.content_inset
+    ));
+    Ok(format!("{}\n", lines.join("\n")))
 }
 
 fn config(out_dir: &Path) -> Config {
@@ -127,10 +225,11 @@ fn generate() -> Result<Files, String> {
         .map_err(|error| format!("exporting the Rust types failed: {error}"));
     let files = exported.and_then(|()| read_folder(&scratch));
     let _ = fs::remove_dir_all(&scratch);
-    let files: Files = files?
+    let mut files: Files = files?
         .into_iter()
         .map(|(path, text)| (path, normalize(&text)))
         .collect();
+    files.insert(CALLS_FILE.to_owned(), calls_file(&config(&scratch))?);
     let problems = brand_problems(&files);
     if problems.is_empty() {
         Ok(files)

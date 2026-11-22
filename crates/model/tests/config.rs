@@ -119,3 +119,20 @@ fn a_new_board_file_holds_the_format_version_the_name_and_no_cards_or_sections()
         "{\n  \"version\": 2,\n  \"name\": \"Garden\",\n  \"cards\": {},\n  \"sections\": {}\n}\n"
     );
 }
+
+#[test]
+fn tag_colours_are_the_tags_with_a_hue_once_each() {
+    let config = BoardConfig::parse(
+        r#"{ "tags": [ { "name": "Vegetable", "hue": 120 }, { "name": "chore" }, { "name": "vegetable", "hue": 10 }, { "name": "herb", "hue": 200.5 } ] }"#,
+    )
+    .expect("config");
+    let hues: Vec<(String, f64)> = config
+        .tag_hues()
+        .into_iter()
+        .map(|entry| (entry.tag.to_string(), entry.hue))
+        .collect();
+    assert_eq!(
+        hues,
+        [("vegetable".to_owned(), 120.0), ("herb".to_owned(), 200.5)]
+    );
+}

@@ -2,7 +2,7 @@ use serde_json::json;
 use wb_model::{
     BoardEvent, BoardId, BoardInfo, BoardSnapshot, BodyChange, Change, DraftSection, Note,
     NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, SectionId, SectionNode, SectionRef,
-    StaleBase, Tag, diff, edit_note, parse, render,
+    StaleBase, Tag, TagHue, diff, edit_note, parse, render,
 };
 
 fn note_id(text: &str) -> NoteId {
@@ -23,6 +23,7 @@ fn section(id: &str, name: &str) -> SectionNode {
     SectionNode {
         id: SectionId::parse(id).expect("section id"),
         name: name.to_owned(),
+        note: String::new(),
         hue: None,
         children: Vec::new(),
     }
@@ -35,6 +36,7 @@ fn snapshot(sections: Vec<SectionNode>, notes: Vec<NoteCard>) -> BoardSnapshot {
             name: "Garden".to_owned(),
         },
         sections,
+        tags: Vec::new(),
         notes,
         strays: Vec::new(),
     }
@@ -246,4 +248,28 @@ fn a_draft_says_where_its_note_goes_in_one_of_three_ways() {
         );
     }
     assert_eq!(NoteDraft::default().section, DraftSection::Default);
+}
+
+#[test]
+fn the_difference_names_changed_tag_colours_and_files_without_an_id() {
+    let before = snapshot(Vec::new(), Vec::new());
+    let after = BoardSnapshot {
+        tags: vec![TagHue {
+            tag: Tag::new("vegetable").expect("tag"),
+            hue: 120.0,
+        }],
+        strays: vec!["loose-page.md".to_owned()],
+        ..before.clone()
+    };
+    assert_eq!(
+        diff(&before, &after),
+        [
+            BoardEvent::TagsChanged {
+                tags: after.tags.clone()
+            },
+            BoardEvent::StraysChanged {
+                strays: after.strays.clone()
+            },
+        ]
+    );
 }

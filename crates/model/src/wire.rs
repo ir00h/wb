@@ -22,8 +22,17 @@ pub struct BoardInfo {
 pub struct BoardSnapshot {
     pub board: BoardInfo,
     pub sections: Vec<SectionNode>,
+    pub tags: Vec<TagHue>,
     pub notes: Vec<NoteCard>,
     pub strays: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub struct TagHue {
+    pub tag: Tag,
+    pub hue: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -157,6 +166,8 @@ pub enum BoardEvent {
     NoteChanged { note: NoteCard },
     NoteRemoved { note: NoteId },
     SectionsChanged { sections: Vec<SectionNode> },
+    TagsChanged { tags: Vec<TagHue> },
+    StraysChanged { strays: Vec<String> },
 }
 
 #[must_use]
@@ -165,6 +176,16 @@ pub fn diff(before: &BoardSnapshot, after: &BoardSnapshot) -> Vec<BoardEvent> {
     if before.sections != after.sections {
         events.push(BoardEvent::SectionsChanged {
             sections: after.sections.clone(),
+        });
+    }
+    if before.tags != after.tags {
+        events.push(BoardEvent::TagsChanged {
+            tags: after.tags.clone(),
+        });
+    }
+    if before.strays != after.strays {
+        events.push(BoardEvent::StraysChanged {
+            strays: after.strays.clone(),
         });
     }
     for note in &after.notes {
