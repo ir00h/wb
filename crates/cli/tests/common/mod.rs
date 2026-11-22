@@ -13,6 +13,7 @@ use serde_json::Value;
 
 pub const WORKSPACE_ENV: &str = "WHITEBOARD_WORKSPACE";
 pub const BOARD_ENV: &str = "WB_BOARD";
+const HOME_ENV: &str = "HOME";
 const TMP: &str = "<tmp>";
 const SHELL: &str = "/bin/sh";
 const WAIT_FOR_THE_START: &str = r#": > "$1"; while [ ! -e "$2" ]; do :; done; shift 2; exec "$@""#;
@@ -86,6 +87,7 @@ impl Scratch {
         let mut command = Command::new(env!("CARGO_BIN_EXE_wb"));
         command
             .current_dir(&self.path)
+            .env(HOME_ENV, &self.path)
             .env_remove(WORKSPACE_ENV)
             .env_remove(BOARD_ENV);
         command
