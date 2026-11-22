@@ -36,6 +36,7 @@ export type CardPlacement = {
 export type Layout = {
   readonly frames: readonly FramePlacement[];
   readonly cards: readonly CardPlacement[];
+  readonly settled: boolean;
 };
 
 export type Heights = ReadonlyMap<NoteId, number>;
@@ -136,7 +137,7 @@ export function layout(snapshot: BoardSnapshot, heights: Heights): Layout {
     x = rect.x + rect.width + FRAME_GAP;
   }
   flowColumns(loose, null, { x, y: BOARD_ORIGIN.y }, heights, placed);
-  return placed;
+  return { ...placed, settled: placed.cards.every((card) => heights.has(card.note)) };
 }
 
 export function contains(outer: Rect, inner: Rect): boolean {

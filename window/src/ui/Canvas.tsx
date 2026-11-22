@@ -77,7 +77,11 @@ export function Canvas({ snapshot, problem }: Props) {
         className="dots"
         style={{ transform: `translate(${dotShift(view.x)}px, ${dotShift(view.y)}px)` }}
       />
-      <div className="world" style={{ transform: `translate(${view.x}px, ${view.y}px)` }}>
+      <div
+        className="world"
+        data-layout={placed.settled ? "settled" : "estimated"}
+        style={{ transform: `translate(${view.x}px, ${view.y}px)` }}
+      >
         {placed.frames.map((frame) => (
           <SectionFrame key={frame.section.id} frame={frame} />
         ))}

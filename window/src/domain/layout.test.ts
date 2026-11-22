@@ -75,4 +75,14 @@ describe("layout", () => {
     const [first, second] = [cardOf(placed, "n3").rect, cardOf(placed, "n5").rect];
     expect(second.y).toBeGreaterThanOrEqual(first.y + first.height);
   });
+
+  it("is settled only once every card it places has a measured height", () => {
+    const every = new Map(garden.notes.map((entry) => [entry.id, 140]));
+    const allButLost = new Map(every);
+    allButLost.delete(noteId("n6"));
+    expect(layout(garden, new Map()).settled).toBe(false);
+    expect(placed.settled).toBe(false);
+    expect(layout(garden, allButLost).settled).toBe(false);
+    expect(layout(garden, every).settled).toBe(true);
+  });
 });
