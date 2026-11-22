@@ -642,11 +642,9 @@ fn click(window: &WebviewWindow, body: &str) -> Reply {
 }
 
 #[cfg(target_os = "macos")]
-fn terminate(window: &WebviewWindow) -> Reply {
-    done(on_main_thread(window, |_, reply| {
-        let _ = reply.send(Ok(()));
-        macos::terminate();
-    }))
+fn terminate(_window: &WebviewWindow) -> Reply {
+    macos::terminate();
+    done(Ok(Ok(())))
 }
 
 #[cfg(not(target_os = "macos"))]

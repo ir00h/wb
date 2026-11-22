@@ -4,7 +4,7 @@ use std::ptr;
 use std::sync::mpsc::Sender;
 
 use block2::RcBlock;
-use objc2::runtime::AnyObject;
+use objc2::runtime::{AnyObject, Bool};
 use objc2::{class, msg_send, sel};
 use objc2_foundation::{NSData, NSPoint, NSRange, NSRect, NSString};
 use tauri::webview::PlatformWebview;
@@ -86,7 +86,12 @@ fn png_of(image: *mut AnyObject) -> Result<Vec<u8>, String> {
 pub fn terminate() {
     unsafe {
         let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
-        let () = msg_send![app, terminate: ptr::null::<AnyObject>()];
+        let () = msg_send![
+            app,
+            performSelectorOnMainThread: sel!(terminate:),
+            withObject: ptr::null::<AnyObject>(),
+            waitUntilDone: Bool::NO
+        ];
     }
 }
 

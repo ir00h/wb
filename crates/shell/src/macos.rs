@@ -2,21 +2,31 @@
 
 use std::sync::{Arc, OnceLock};
 
-use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
 use objc2::{class, ffi, msg_send, sel};
 
-use crate::closing::Closing;
+use tauri::AppHandle;
 
-const TERMINATE_CANCEL: usize = 0;
+use crate::closing::{Closing, TerminateReply};
+
+const TERMINATE_NOW: usize = 1;
+const TERMINATE_LATER: usize = 2;
 const SHOULD_TERMINATE_TYPES: &std::ffi::CStr = c"Q@:@";
 
 static CLOSING: OnceLock<Arc<Closing>> = OnceLock::new();
 
 extern "C-unwind" fn should_terminate(_: &AnyObject, _: Sel, _: &AnyObject) -> usize {
-    if let Some(closing) = CLOSING.get() {
-        closing.ask_window();
+    match CLOSING.get().map(Closing::terminate_requested) {
+        None | Some(TerminateReply::Now) => TERMINATE_NOW,
+        Some(TerminateReply::Later) => TERMINATE_LATER,
     }
-    TERMINATE_CANCEL
+}
+
+pub fn reply_to_terminate(app: &AppHandle, terminate: bool) {
+    let _ = app.run_on_main_thread(move || unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let () = msg_send![app, replyToApplicationShouldTerminate: Bool::new(terminate)];
+    });
 }
 
 pub fn route_quit_requests(closing: &Arc<Closing>) -> Result<(), String> {

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tauri::{App, AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 use wb_core::Workspace;
 
-use crate::closing::{Closing, ExitRequest};
+use crate::closing::{Closing, ExitRequest, Settle};
 use crate::host::Host;
 use crate::settings::{BOARD_VARIABLE, WORKSPACE_VARIABLE, settings};
 
@@ -56,12 +56,12 @@ fn run() -> Result<(), Box<dyn Error>> {
     let app = builder
         .setup(move |app| {
             let asking = app.handle().clone();
-            let exiting = app.handle().clone();
+            let settling = app.handle().clone();
             let closing = Closing::new(
                 move || {
                     let _ = asking.emit(wb_model::CLOSE_REQUESTED_EVENT, ());
                 },
-                move || exiting.exit(0),
+                move |settle| settle_close(&settling, settle),
                 closing::WINDOW_ANSWER_LIMIT,
             );
             #[cfg(target_os = "macos")]
@@ -104,6 +104,16 @@ fn follow_close_requests(app: &AppHandle, event: RunEvent) {
             closing().ask_window();
         }
         _ => {}
+    }
+}
+
+fn settle_close(app: &AppHandle, settle: Settle) {
+    match settle {
+        Settle::Exit => app.exit(0),
+        #[cfg(target_os = "macos")]
+        Settle::ReplyToTerminate(terminate) => macos::reply_to_terminate(app, terminate),
+        #[cfg(not(target_os = "macos"))]
+        Settle::ReplyToTerminate(_) => {}
     }
 }
 
