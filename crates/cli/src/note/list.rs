@@ -5,7 +5,7 @@ use wb_model::{SectionPath, Tag, same_section_name};
 
 use crate::context::Context;
 use crate::error::Result;
-use crate::notes::{self, label, section_of, tag_names};
+use crate::notes::{self, label, malformed_tag, section_of, tag_names};
 use crate::output::{list_or_dash, or_dash, table};
 use crate::section::missing_section;
 
@@ -71,6 +71,9 @@ pub fn list(cx: &Context, filter: &FilterArgs) -> Result<Vec<NoteSummary>> {
         None => None,
     };
     let tags = Tag::list(&filter.tags);
+    if let Some(tag) = tags.iter().find(|tag| !tag.is_well_formed()) {
+        return Err(malformed_tag(&filter.tags, tag.as_str()));
+    }
     let mut files: Vec<NoteFile> = board
         .board
         .notes()?

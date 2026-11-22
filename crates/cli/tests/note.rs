@@ -241,6 +241,27 @@ fn note_add_refuses_a_tag_that_is_not_well_formed_and_writes_nothing() {
 }
 
 #[test]
+fn note_list_refuses_a_tag_that_is_not_well_formed() {
+    let garden = Garden::new("note-list-bad-tag");
+    garden.add_note(&["--title", "Plant list", "--tag", "plan"]);
+    for args in [
+        &["note", "list", "--tag", "plan", "--tag", "Plan!"][..],
+        &["note", "list", "--tag", "Plan!", "--json"],
+    ] {
+        let run = garden.wb(args);
+        assert_eq!(
+            (run.code, run.stdout.as_str(), run.stderr.as_str()),
+            (
+                1,
+                "",
+                "\"Plan!\" is not a well-formed tag: use lowercase words joined by -, with / for a namespace, like plan or ticket/abc-12.\n"
+            ),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
 fn note_add_with_nothing_writes_an_empty_note() {
     let garden = Garden::new("note-add-empty");
     let run = garden.wb(&["note", "add", "--json"]).ok();

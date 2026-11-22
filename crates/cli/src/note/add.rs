@@ -1,9 +1,9 @@
 use serde::Serialize;
-use wb_model::{DraftSection, Error, Invalid, NoteDraft, Op, Outcome, Tag};
+use wb_model::{DraftSection, Error, Invalid, NoteDraft, Op, Outcome};
 
 use crate::context::{BoardRef, Context};
 use crate::error::{Failure, Result, fail};
-use crate::notes::{section_of, tag_names};
+use crate::notes::{malformed_tag, section_of, tag_names};
 use crate::section;
 
 const NO_SECTION: &str = "none";
@@ -43,16 +43,6 @@ fn draft_section(board: &BoardRef, named: Option<&str>) -> Result<DraftSection> 
             section: section::named(&board.sections()?, text)?,
         }),
     }
-}
-
-fn malformed_tag(given: &[String], tag: &str) -> Failure {
-    let written = given
-        .iter()
-        .find(|text| Tag::new(text).is_some_and(|normal| normal.as_str() == tag))
-        .map_or(tag, String::as_str);
-    Failure(format!(
-        "\"{written}\" is not a well-formed tag: use lowercase words joined by -, with / for a namespace, like plan or ticket/abc-12"
-    ))
 }
 
 pub fn add(cx: &Context, request: NewNote) -> Result<Added> {
