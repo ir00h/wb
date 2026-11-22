@@ -28,7 +28,7 @@ pub enum Error {
     )]
     DuplicateNote { note: NoteId, files: Vec<String> },
     #[error(
-        "`{path}` is not a plain file, so nothing was written to it; put the file back in place of what is there and try again"
+        "`{path}` is a link or a folder, not a plain file, and the board writes only to plain files, so nothing was written to it or through it"
     )]
     NotAPlainFile { path: String },
     #[error("there is no section {section} on this board")]

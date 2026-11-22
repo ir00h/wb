@@ -111,6 +111,12 @@ fn an_edit_keeps_the_permission_bits_of_a_note_and_of_the_config() {
     );
 }
 
+const LINK_REFUSED: &str = " is a link or a folder, not a plain file, and the board writes only to plain files, so nothing was written to it or through it";
+
+fn tick(path: &std::path::Path) -> String {
+    format!("`{}`", path.display())
+}
+
 const FIRST_COPY: &str = "---\nid: ndup001\n---\n\n# Apple\n\nfirst copy\n";
 const SECOND_COPY: &str = "---\nid: ndup001\n---\n\n# Apple\n\nsecond copy\n";
 
@@ -309,6 +315,10 @@ fn a_note_that_is_a_link_is_listed_and_never_written_through_or_replaced() {
             path: link.display().to_string()
         })
     );
+    assert_eq!(
+        answer.expect_err("refused").to_string(),
+        format!("{}{LINK_REFUSED}", tick(&link))
+    );
     assert!(
         fs::symlink_metadata(&link)
             .expect("link")
@@ -351,6 +361,10 @@ fn a_config_that_is_a_link_is_never_replaced() {
     let answer = board.apply(add_section("Beds"));
 
     assert_eq!(
+        answer.clone().map_err(|error| error.to_string()),
+        Err(format!("{}{LINK_REFUSED}", tick(&config)))
+    );
+    assert_eq!(
         answer,
         Err(wb_model::Error::NotAPlainFile {
             path: config.display().to_string()
@@ -366,4 +380,28 @@ fn a_config_that_is_a_link_is_never_replaced() {
         fs::read_to_string(&elsewhere).expect("linked config"),
         "{\n  \"version\": 1\n}\n"
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_config_that_is_a_link_to_nothing_is_refused_as_a_link_and_nothing_is_created() {
+    let scratch = Scratch::new("dangling-config");
+    let board = scratch.garden();
+    let nowhere = scratch.path().join("nowhere.json");
+    let config = scratch.path().join("garden").join(CONFIG_FILE);
+    std::os::unix::fs::symlink(&nowhere, &config).expect("link");
+
+    let answer = board.apply(add_section("Beds"));
+
+    assert_eq!(
+        answer.map_err(|error| error.to_string()),
+        Err(format!("{}{LINK_REFUSED}", tick(&config)))
+    );
+    assert!(
+        fs::symlink_metadata(&config)
+            .expect("link")
+            .file_type()
+            .is_symlink()
+    );
+    assert!(!nowhere.exists(), "the config was created through the link");
 }

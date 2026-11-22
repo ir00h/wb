@@ -74,6 +74,7 @@ pub fn change<T>(
                 .map_err(io_failure(&path))?
             {
                 Created::Done => Replaced::Done,
+                Created::Exists if is_there_but_not_a_plain_file(&path) => Replaced::NotAPlainFile,
                 Created::Exists => Replaced::Gone,
             },
         };
@@ -85,4 +86,8 @@ pub fn change<T>(
         };
     }
     Err(kept_changing(&path))
+}
+
+fn is_there_but_not_a_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|entry| !entry.file_type().is_file())
 }
