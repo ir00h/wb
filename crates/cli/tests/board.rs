@@ -220,7 +220,16 @@ fn board_show_gives_sections_tags_and_settings() {
         "--tag",
         "watering",
     ]);
-    garden.add_note(&["--title", "Seed order", "--section", "Seed trays"]);
+    garden.add_note(&[
+        "--title",
+        "Seed order",
+        "--section",
+        "Seed trays",
+        "--tag",
+        "watering",
+        "--tag",
+        "beans",
+    ]);
     let text = garden.wb(&["board", "show"]).ok();
     assert_eq!(
         garden.normalise(&text.stdout, &[]),
@@ -234,7 +243,7 @@ Beds        1      sBEDS00  default  -       -
     Herbs   0      sHERBS0           -       -
 Seed trays  1      sTRAYS0           -       -
 
-Tags: plan (2), watering (1)
+Tags: plan (2), watering (2), beans (1)
 Default section: Beds
 Archive section: -
 Automatic tags: -
@@ -273,7 +282,11 @@ Rules: none; `wb rules init` writes a first version
     assert_eq!(json["sections"][0]["default"], true);
     assert_eq!(
         json["tags"],
-        serde_json::json!([{"name": "plan", "notes": 2}, {"name": "watering", "notes": 1}])
+        serde_json::json!([
+            {"name": "plan", "notes": 2},
+            {"name": "watering", "notes": 2},
+            {"name": "beans", "notes": 1}
+        ])
     );
     assert_eq!(json["rules"], serde_json::Value::Null);
 }
@@ -305,6 +318,30 @@ fn board_show_names_a_default_or_archive_section_the_config_lacks_as_missing() {
             &serde_json::json!("Beds")
         )
     );
+}
+
+#[test]
+fn no_line_of_a_table_ends_in_a_space() {
+    let garden = Garden::new("trailing-space");
+    fs::write(
+        garden.scratch.workspace().join("garden/board.config.json"),
+        "{\"sections\": [{\"id\": \"sbeds00\", \"name\": \"Beds \", \"next\": \"sbeds00\"}], \"repos\": [\"\"]}",
+    )
+    .expect("config written");
+    garden.add_note(&["--title", "Plant list", "--tag", "plan"]);
+    for args in [
+        &["board", "list"][..],
+        &["section", "list"],
+        &["note", "list"],
+    ] {
+        let run = garden.wb(args).ok();
+        let spaced: Vec<&str> = run
+            .stdout
+            .lines()
+            .filter(|line| line.ends_with(char::is_whitespace))
+            .collect();
+        assert!(spaced.is_empty(), "{args:?} printed {spaced:?}");
+    }
 }
 
 #[test]

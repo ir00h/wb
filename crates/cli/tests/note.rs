@@ -397,6 +397,52 @@ Backlinks: none
 }
 
 #[test]
+fn note_show_prints_the_kind_of_a_note_and_the_board_it_opens() {
+    let garden = Garden::new("note-show-kind");
+    fs::write(
+        garden.scratch.workspace().join("garden/shed-nshed01.md"),
+        "---\nid: nshed01\nkind: board\nboard: garden/shed\n---\n\n# Shed\n",
+    )
+    .expect("note written");
+    let text = garden.wb(&["note", "show", "nshed01"]).ok();
+    assert_eq!(
+        garden.normalise(&text.stdout, &[]),
+        "nshed01  Shed
+board:    garden
+file:     <tmp>/ws/garden/shed-nshed01.md
+section:  -
+tags:     -
+kind:     board
+opens:    garden/shed
+
+Backlinks: none
+"
+    );
+    let json = garden
+        .wb(&["note", "show", "nshed01", "--json"])
+        .ok()
+        .json();
+    assert_eq!(
+        (&json["kind"], &json["opens"]),
+        (&json!("board"), &json!("garden/shed"))
+    );
+}
+
+#[test]
+fn a_note_is_named_by_the_last_hash_in_board_hash_id() {
+    let garden = Garden::new("note-hash");
+    let id = plant_list(&garden);
+    let run = garden.wb(&["note", "show", &format!("garden#beds#{id}")]);
+    assert_eq!(
+        (run.code, run.stderr.as_str()),
+        (
+            1,
+            "\"garden#beds\" is not a board id; ids are folder paths like kitchen/recipes; boards: garden.\n"
+        )
+    );
+}
+
+#[test]
 fn note_show_of_an_untitled_note_and_of_a_missing_one() {
     let garden = Garden::new("note-show-empty");
     let id = garden.add_note(&[]);

@@ -15,9 +15,7 @@ pub fn emit<T: Serialize + ?Sized>(
     } else {
         render(value)
     };
-    if !text.is_empty() {
-        println!("{}", text.trim_end());
-    }
+    println!("{text}");
     Ok(())
 }
 
