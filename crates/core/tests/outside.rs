@@ -66,6 +66,41 @@ fn a_note_added_while_an_editor_saves_the_config_in_place_lands_in_the_default_s
 }
 
 #[test]
+fn the_config_and_a_snapshot_read_while_an_editor_saves_the_config_in_place_see_its_sections() {
+    let seen = with_an_editor_that_saves_in_time(|| {
+        let scratch = Scratch::new("config-in-place-read");
+        let board = scratch.garden();
+        let config = scratch.path().join("garden").join(CONFIG_FILE);
+
+        let editor = start_a_save_in_place(&config);
+        let read = board.config().expect("config");
+        let read_took = editor.join().expect("editor");
+        let editor = start_a_save_in_place(&config);
+        let snapshot = board.snapshot().expect("snapshot");
+        let snapshot_took = editor.join().expect("editor");
+
+        let names = (
+            read.section_entries()
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect::<Vec<_>>(),
+            snapshot
+                .sections
+                .iter()
+                .map(|node| node.name.clone())
+                .collect::<Vec<_>>(),
+        );
+        (read_took.max(snapshot_took), names)
+    });
+
+    assert_eq!(
+        seen,
+        (vec!["Beds".to_owned()], vec!["Beds".to_owned()]),
+        "the config and the snapshot answered from the emptied file"
+    );
+}
+
+#[test]
 fn a_config_that_stays_blank_is_an_empty_config() {
     let scratch = Scratch::new("config-blank");
     let board = scratch.garden();
