@@ -51,13 +51,13 @@ pub fn every_test_passes_again_on(volume: &str) {
         .output()
         .expect("test run");
     let said = String::from_utf8_lossy(&run.stdout);
+    let failures = said
+        .split_once("\nfailures:\n")
+        .map_or(&*said, |(_, failures)| failures);
     assert!(
         run.status.success(),
-        "on a volume {volume} these tests failed:\n{}",
-        said.lines()
-            .filter(|line| line.contains("FAILED") || line.contains("panicked"))
-            .collect::<Vec<_>>()
-            .join("\n")
+        "on a volume {volume} these tests failed:\n{failures}\n{}",
+        String::from_utf8_lossy(&run.stderr)
     );
 }
 
