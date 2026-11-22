@@ -1,5 +1,5 @@
 use serde::Serialize;
-use wb_model::{DraftSection, NoteDraft, Op, Outcome, SectionId, SectionTree};
+use wb_model::{DraftSection, NoteDraft, Op, Outcome};
 
 use crate::context::{BoardRef, Context};
 use crate::error::{Result, fail};
@@ -36,27 +36,13 @@ fn title_from_body(body: &str) -> Option<(String, String)> {
 }
 
 fn draft_section(board: &BoardRef, named: Option<&str>) -> Result<DraftSection> {
-    let Some(text) = named.map(str::trim) else {
-        return Ok(DraftSection::Default);
-    };
-    if !text.eq_ignore_ascii_case(NO_SECTION) {
-        let section = section::named(&board.sections()?, text)?;
-        return Ok(DraftSection::Named { section });
+    match named.map(str::trim) {
+        None => Ok(DraftSection::Default),
+        Some(text) if text.eq_ignore_ascii_case(NO_SECTION) => Ok(DraftSection::NoSection),
+        Some(text) => Ok(DraftSection::Named {
+            section: section::named(&board.sections()?, text)?,
+        }),
     }
-    let config = board.config()?;
-    let sections = SectionTree::from_config(&config);
-    let default = config
-        .default_section
-        .as_deref()
-        .and_then(|id| SectionId::parse(id).ok())
-        .filter(|id| sections.contains(id));
-    if let Some(default) = default {
-        fail!(
-            "this board puts a note without a section into its default section \"{}\", so --section none cannot be kept yet; name a section instead",
-            section::path_text(&sections, &default)
-        )
-    }
-    Ok(DraftSection::NoSection)
 }
 
 pub fn add(cx: &Context, request: NewNote) -> Result<Added> {

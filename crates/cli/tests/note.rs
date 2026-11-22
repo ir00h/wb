@@ -248,7 +248,7 @@ fn note_add_with_nothing_writes_an_empty_note() {
 }
 
 #[test]
-fn note_add_goes_to_the_default_section_and_refuses_a_missing_one() {
+fn note_add_goes_to_the_default_section_or_to_none_and_refuses_a_missing_one() {
     let garden = Garden::new("note-add-sections");
     let missing = garden.wb(&[
         "note",
@@ -277,16 +277,25 @@ fn note_add_goes_to_the_default_section_and_refuses_a_missing_one() {
         .wb(&["note", "add", "--title", "Edging", "--body", "x", "--json"])
         .ok();
     assert_eq!(edging.json()["section"], "Beds");
-    let none = garden.wb(&["note", "add", "--title", "Compost", "--section", "none"]);
+    let none = garden
+        .wb(&[
+            "note",
+            "add",
+            "--title",
+            "Compost",
+            "--section",
+            "None",
+            "--json",
+        ])
+        .ok();
+    assert_eq!(none.json()["section"], Value::Null);
+    let compost = text_of(&none.json(), "id");
     assert_eq!(
-        (none.code, none.stderr.as_str()),
-        (
-            1,
-            "This board puts a note without a section into its default section \"Beds\", so --section none cannot be kept yet; name a section instead.\n"
-        )
+        garden.scratch.read(&format!("garden/compost-{compost}.md")),
+        format!("---\nid: {compost}\n---\n\n# Compost\n")
     );
     let notes = garden.wb(&["note", "list", "--json"]).ok().json();
-    assert_eq!(notes.as_array().map(Vec::len), Some(2));
+    assert_eq!(notes.as_array().map(Vec::len), Some(3));
 }
 
 fn plant_list(garden: &Garden) -> String {
