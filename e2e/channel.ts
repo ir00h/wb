@@ -31,6 +31,10 @@ export function backgroundRequested(): boolean {
 
 class ChannelFailure extends Error {}
 
+function zeroSize(facts: WindowFacts): string {
+  return `the window is ${facts.width} x ${facts.height} points, so nothing in it can be seen; give the main window a width and a height in tauri.conf.json`;
+}
+
 function tookFocus(samples: number): string {
   return `the app became the frontmost app in background mode (${samples} samples); set the activation policy before the event loop starts`;
 }
@@ -315,6 +319,7 @@ export class ChannelDriver implements Driver {
         WHITEBOARD_WORKSPACE: workspace,
         WB_AUTOMATION_PORT: "0",
         WB_AUTOMATION_BACKGROUND: this.#background ? "1" : "0",
+        WB_AUTOMATION_RUNNER: String(process.pid),
         ...options.env,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -337,7 +342,12 @@ export class ChannelDriver implements Driver {
       this.#focusWatchers.push(watching);
     }
     const address = await announcedAddress(this.#shell, child, () => output);
-    return new ChannelApp(workspace, `http://${address}`, child, () => output, watching);
+    const app = new ChannelApp(workspace, `http://${address}`, child, () => output, watching);
+    const facts = await app.window();
+    if (facts.width <= 0 || facts.height <= 0) {
+      throw new ChannelFailure(zeroSize(facts));
+    }
+    return app;
   }
 
   async dispose(): Promise<void> {

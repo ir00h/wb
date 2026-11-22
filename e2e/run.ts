@@ -2,7 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { backgroundRequested, ChannelDriver } from "./channel.ts";
 import { JOURNEYS } from "./journeys.ts";
-import { claimRunFolder, removeAbandonedRuns } from "./scratch.ts";
+import { claimRunFolder, removeAbandonedRuns, sweepReport } from "./scratch.ts";
 
 const shell = process.env.WB_E2E_SHELL;
 if (shell === undefined) {
@@ -10,8 +10,8 @@ if (shell === undefined) {
   process.exit(2);
 }
 
-for (const folder of await removeAbandonedRuns()) {
-  console.log(`      removed ${folder}, left by a run that no longer exists`);
+for (const line of sweepReport(await removeAbandonedRuns())) {
+  console.log(`      ${line}`);
 }
 
 const scratch = await claimRunFolder();

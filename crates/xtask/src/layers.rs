@@ -50,6 +50,7 @@ const LAYERS: &[Layer] = &[
             "block2",
             "objc2",
             "objc2-foundation",
+            "rustix",
             "serde",
             "serde_json",
             "tauri",

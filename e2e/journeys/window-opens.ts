@@ -52,6 +52,24 @@ export const windowOpens: Journey = {
     );
     assert.deepEqual(lines, [PRODUCT_NAME, "No board open", "Desktop shell"]);
 
+    const heading = await app.evaluate(() => {
+      const heading = document.querySelector("h1");
+      if (heading === null) {
+        return "there is no heading";
+      }
+      const box = heading.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      if (hit !== heading) {
+        return `the element at the heading's centre is ${hit === null ? "nothing" : hit.outerHTML.slice(0, 120)}`;
+      }
+      const style = getComputedStyle(heading);
+      if (Number(style.opacity) === 0 || style.color.replace(/\s/g, "").endsWith(",0)")) {
+        return `the heading is drawn invisible (opacity ${style.opacity}, colour ${style.color})`;
+      }
+      return "seen";
+    });
+    assert.equal(heading, "seen", `the heading cannot be seen: ${heading}`);
+
     const shot = join(artifacts, "window-opens.png");
     await app.snapshot(shot);
     const png = await readPng(shot);

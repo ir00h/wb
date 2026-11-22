@@ -18,6 +18,7 @@ automation = [
   "dep:block2",
   "dep:objc2",
   "dep:objc2-foundation",
+  "dep:rustix",
 ]
 
 [build-dependencies]
@@ -30,6 +31,9 @@ tauri.workspace = true
 tiny_http = { workspace = true, optional = true }
 wb-core.workspace = true
 wb-model.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, optional = true, features = ["process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { workspace = true, optional = true }

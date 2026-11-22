@@ -55,7 +55,37 @@ async function abandoned(folder: string): Promise<boolean> {
   return (await startOf(owner.pid)) !== owner.started;
 }
 
-export async function removeAbandonedRuns(): Promise<string[]> {
+export type Sweep =
+  | { readonly kind: "swept"; readonly removed: readonly string[] }
+  | { readonly kind: "processesUnreadable"; readonly reason: string };
+
+function reasonOf(error: unknown): string {
+  return error instanceof Error ? (error.message.split("\n")[0] ?? error.message) : String(error);
+}
+
+export function sweepReport(sweep: Sweep): readonly string[] {
+  switch (sweep.kind) {
+    case "swept":
+      return sweep.removed.map(
+        (folder) => `removed ${folder}, left by a run that no longer exists`,
+      );
+    case "processesUnreadable":
+      return [
+        `cannot read the process list (${sweep.reason}), so no folder left by an earlier run was removed`,
+      ];
+    default: {
+      const unknown: never = sweep;
+      return unknown;
+    }
+  }
+}
+
+export async function removeAbandonedRuns(): Promise<Sweep> {
+  try {
+    await startOf(process.pid);
+  } catch (error) {
+    return { kind: "processesUnreadable", reason: reasonOf(error) };
+  }
   const removed: string[] = [];
   for (const name of await readdir(tmpdir())) {
     if (!name.startsWith(RUN_PREFIX)) {
@@ -67,16 +97,15 @@ export async function removeAbandonedRuns(): Promise<string[]> {
       removed.push(folder);
     }
   }
-  return removed;
+  return { kind: "swept", removed };
 }
 
 export async function claimRunFolder(): Promise<string> {
-  const started = await startOf(process.pid);
-  if (started === null) {
-    throw new Error("cannot read the start time of this process to mark its temporary folder");
-  }
   const folder = await mkdtemp(join(tmpdir(), RUN_PREFIX));
-  const owner: Owner = { pid: process.pid, started };
-  await writeFile(join(folder, OWNER_FILE), JSON.stringify(owner));
+  const started = await startOf(process.pid).catch(() => null);
+  if (started !== null) {
+    const owner: Owner = { pid: process.pid, started };
+    await writeFile(join(folder, OWNER_FILE), JSON.stringify(owner));
+  }
   return folder;
 }

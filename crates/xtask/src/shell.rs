@@ -10,10 +10,11 @@ const AUTOMATION_FEATURES: &str = "automation,tauri/custom-protocol";
 const JOURNEY_RUNNER: &str = "e2e/run.ts";
 const AUTOMATION_EXECUTABLE: &str = "whiteboard-automation";
 
-const CHANNEL_MARKERS: [&str; 5] = [
+const CHANNEL_MARKERS: [&str; 6] = [
     "AUTOMATION_LISTENING",
     "WB_AUTOMATION_PORT",
     "WB_AUTOMATION_BACKGROUND",
+    "WB_AUTOMATION_RUNNER",
     "settle_evaluation",
     "_setWindowOcclusionDetectionEnabled",
 ];

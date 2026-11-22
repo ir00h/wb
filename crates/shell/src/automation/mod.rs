@@ -2,7 +2,6 @@
 mod macos;
 
 use std::collections::HashMap;
-#[cfg(unix)]
 use std::io::Write;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -16,12 +15,13 @@ use tiny_http::{Header, Method, Request, Response, Server};
 
 const PORT_VARIABLE: &str = "WB_AUTOMATION_PORT";
 const BACKGROUND_VARIABLE: &str = "WB_AUTOMATION_BACKGROUND";
+const RUNNER_VARIABLE: &str = "WB_AUTOMATION_RUNNER";
 const LISTENING_ANNOUNCEMENT: &str = "AUTOMATION_LISTENING";
 const SETTLE_COMMAND: &str = "settle_evaluation";
 const EVALUATION_TIMEOUT: Duration = Duration::from_secs(10);
 const ROUTES: &str = "POST /evaluate, GET /snapshot, GET /window, POST /quit";
 #[cfg(unix)]
-const LAUNCHER_POLL: Duration = Duration::from_millis(200);
+const RUNNER_POLL: Duration = Duration::from_millis(200);
 
 #[derive(Clone)]
 pub struct Automation {
@@ -37,6 +37,18 @@ struct Channel {
 struct Settings {
     port: u16,
     background: bool,
+}
+
+fn runner_pid(runner: Option<&str>) -> Result<Option<i32>, String> {
+    let Some(runner) = runner else {
+        return Ok(None);
+    };
+    match runner.parse::<i32>() {
+        Ok(pid) if pid > 1 => Ok(Some(pid)),
+        _ => Err(format!(
+            "{RUNNER_VARIABLE} must be the process id of the program that runs the app, not `{runner}`"
+        )),
+    }
 }
 
 fn settings(port: Option<&str>, background: Option<&str>) -> Result<Option<Settings>, String> {
@@ -75,6 +87,7 @@ impl Automation {
     pub fn from_env() -> Result<Automation, String> {
         let port = variable(PORT_VARIABLE)?;
         let background = variable(BACKGROUND_VARIABLE)?;
+        let runner = runner_pid(variable(RUNNER_VARIABLE)?.as_deref())?;
         let Some(Settings { port, background }) = settings(port.as_deref(), background.as_deref())?
         else {
             return Ok(Automation { channel: None });
@@ -87,7 +100,9 @@ impl Automation {
         let server = Server::http((Ipv4Addr::LOCALHOST, port))
             .map_err(|error| format!("the automation channel cannot listen: {error}"))?;
         #[cfg(unix)]
-        exit_with_launcher();
+        exit_with_runner(runner);
+        #[cfg(not(unix))]
+        let _ = runner;
         Ok(Automation {
             channel: Some(Arc::new(Channel {
                 background,
@@ -155,11 +170,12 @@ fn stay_out_of_the_dock(app: &mut App) {
 fn stay_out_of_the_dock(_app: &mut App) {}
 
 #[cfg(unix)]
-fn exit_with_launcher() {
-    let launcher = std::os::unix::process::parent_id();
+fn exit_with_runner(runner: Option<i32>) {
+    let watched = runner
+        .unwrap_or_else(|| i32::try_from(std::os::unix::process::parent_id()).unwrap_or_default());
     std::thread::spawn(move || {
-        while std::os::unix::process::parent_id() == launcher {
-            std::thread::sleep(LAUNCHER_POLL);
+        while is_running(watched) {
+            std::thread::sleep(RUNNER_POLL);
         }
         let _ = writeln!(
             std::io::stderr(),
@@ -167,6 +183,17 @@ fn exit_with_launcher() {
         );
         std::process::exit(1);
     });
+}
+
+#[cfg(unix)]
+fn is_running(pid: i32) -> bool {
+    let Some(pid) = rustix::process::Pid::from_raw(pid) else {
+        return false;
+    };
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => true,
+        Err(error) => error != rustix::io::Errno::SRCH,
+    }
 }
 
 impl Channel {
@@ -209,8 +236,12 @@ fn listen(server: Server, window: WebviewWindow, background: bool) {
         .server_addr()
         .to_ip()
         .map_or_else(String::new, |address| address.to_string());
-    println!("{LISTENING_ANNOUNCEMENT} {address}");
+    announce(&mut std::io::stdout().lock(), &address);
     std::thread::spawn(move || serve(&server, &window, background));
+}
+
+fn announce(out: &mut impl Write, address: &str) {
+    let _ = writeln!(out, "{LISTENING_ANNOUNCEMENT} {address}").and_then(|()| out.flush());
 }
 
 #[derive(Default)]
@@ -458,7 +489,36 @@ fn window_facts(window: &WebviewWindow, background: bool) -> Reply {
 
 #[cfg(test)]
 mod tests {
-    use super::{Settings, settings};
+    use super::{Settings, announce, runner_pid, settings};
+    use std::io::{self, Write};
+
+    struct ClosedPipe;
+
+    impl Write for ClosedPipe {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Err(io::Error::from(io::ErrorKind::BrokenPipe))
+        }
+    }
+
+    #[test]
+    fn announcing_to_a_closed_pipe_does_not_abort() {
+        announce(&mut ClosedPipe, "127.0.0.1:1");
+        let mut written = Vec::new();
+        announce(&mut written, "127.0.0.1:2");
+        assert_eq!(written, b"AUTOMATION_LISTENING 127.0.0.1:2\n");
+    }
+
+    #[test]
+    fn the_runner_is_a_process_id() {
+        assert_eq!(runner_pid(None), Ok(None));
+        assert_eq!(runner_pid(Some("4242")), Ok(Some(4242)));
+        assert!(runner_pid(Some("1")).is_err());
+        assert!(runner_pid(Some("node")).is_err());
+    }
 
     #[test]
     fn the_channel_is_off_without_a_port() {
