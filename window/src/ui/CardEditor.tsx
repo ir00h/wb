@@ -73,6 +73,33 @@ export function CardEditor({ note }: { note: NoteId }) {
           </div>
         </div>
       )}
+      {(phase.kind === "removed" || phase.kind === "restoring") && (
+        <div className="conflict" data-removed={note}>
+          <p className="conflict-label">
+            Another program removed this note. Your text is still here and is not saved.
+          </p>
+          <div className="conflict-actions">
+            <button
+              type="button"
+              data-restore
+              disabled={phase.kind === "restoring"}
+              onMouseDown={keepFocus}
+              onClick={() => edit(note, { type: "restore" })}
+            >
+              Save as a new note
+            </button>
+            <button
+              type="button"
+              data-discard
+              disabled={phase.kind === "restoring"}
+              onMouseDown={keepFocus}
+              onClick={() => edit(note, { type: "discard" })}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

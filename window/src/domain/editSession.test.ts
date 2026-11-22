@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { NoteCard } from "../bindings/NoteCard";
 import { noteId } from "./boards.fixture";
 import {
   beginEditing,
@@ -7,10 +8,18 @@ import {
   type EditSession,
   type EditStep,
   KEPT_OPEN_FOR_CONFLICT,
+  KEPT_OPEN_FOR_REMOVED,
   stepEdit,
 } from "./editSession";
 
 const plantList = noteId("n1");
+const plantCard: NoteCard = {
+  id: plantList,
+  title: "Plant list",
+  body: "Tomatoes",
+  tags: [],
+  section: null,
+};
 
 function run(events: readonly EditEvent[], from = beginEditing(plantList, "Tomatoes")): EditStep {
   let current: EditStep = { session: from, effects: [] };
@@ -96,11 +105,43 @@ describe("edit session", () => {
     });
   });
 
-  it("says so when the note is removed under unsaved text", () => {
-    expect(run([{ type: "typed", draft: "Mine" }, { type: "removed" }]).effects).toEqual([
-      { type: "end" },
-      { type: "notice", text: "Another program removed this note before your text was saved." },
+  it("ends without a word when a note with nothing typed is removed", () => {
+    expect(run([{ type: "removed", card: plantCard }]).effects).toEqual([{ type: "end" }]);
+  });
+
+  it("keeps typed text of a removed note until the user saves it anew or discards it", () => {
+    const removed = run([
+      { type: "typed", draft: "Mine" },
+      { type: "removed", card: plantCard },
     ]);
+    expect(removed.session).toMatchObject({
+      draft: "Mine",
+      open: true,
+      phase: { kind: "removed", card: plantCard },
+    });
+    expect(removed.effects).toEqual([{ type: "cancelSave" }, { type: "stayOpen" }]);
+    for (const event of [{ type: "closed" }, { type: "saveDue" }] as const) {
+      expect(stepEdit(removed.session, event).effects).not.toContainEqual({ type: "end" });
+    }
+    const typedOn = stepEdit(removed.session, { type: "typed", draft: "Mine, more" }).session;
+    const restoring = stepEdit(typedOn, { type: "restore" });
+    expect(restoring.effects).toEqual([{ type: "restore", card: plantCard, body: "Mine, more" }]);
+    const refused = stepEdit(restoring.session, { type: "failed", message: "busy" });
+    expect(refused.session.phase).toEqual({ kind: "removed", card: plantCard });
+    expect(refused.effects).toContainEqual({ type: "notice", text: "busy" });
+    expect(stepEdit(restoring.session, { type: "restored" }).effects).toEqual([{ type: "end" }]);
+    expect(stepEdit(removed.session, { type: "discard" }).effects).toEqual([{ type: "end" }]);
+  });
+
+  it("turns a removed note that comes back into a conflict", () => {
+    const removed = run([
+      { type: "typed", draft: "Mine" },
+      { type: "removed", card: plantCard },
+    ]).session;
+    expect(stepEdit(removed, { type: "changedOutside", body: "Theirs" }).session.phase).toEqual({
+      kind: "conflict",
+      theirs: "Theirs",
+    });
   });
 });
 
@@ -118,6 +159,11 @@ describe("closing the window", () => {
   it("sends typed text that waits for its pause, then waits for the answer", () => {
     expect(closeVerdict([clean, typed])).toEqual({ kind: "send", notes: [plantList] });
     expect(closeVerdict([saving, typed])).toEqual({ kind: "wait" });
+  });
+
+  it("stays open while a removed note holds typed text", () => {
+    const removed = stepEdit(typed, { type: "removed", card: plantCard }).session;
+    expect(closeVerdict([clean, removed])).toEqual({ kind: "stay", reason: KEPT_OPEN_FOR_REMOVED });
   });
 
   it("stays open while a conflict holds typed text", () => {

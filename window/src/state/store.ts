@@ -2,6 +2,8 @@ import { create } from "zustand";
 import type { BoardId } from "../bindings/BoardId";
 import type { BoardSnapshot } from "../bindings/BoardSnapshot";
 import type { Events } from "../bindings/Calls";
+import type { DraftSection } from "../bindings/DraftSection";
+import type { NoteCard } from "../bindings/NoteCard";
 import type { NoteId } from "../bindings/NoteId";
 import type { Outcome } from "../bindings/Outcome";
 import { call, listen, runsInDesktopShell } from "../bridge/desktop";
@@ -98,16 +100,23 @@ function applyUpdate(update: BoardUpdate): void {
   if (board.kind !== "open" || board.snapshot.board.id !== update.board) {
     return;
   }
-  useWindow.setState({ board: { ...board, snapshot: applyEvents(board.snapshot, update.events) } });
+  const before = board.snapshot;
+  useWindow.setState({ board: { ...board, snapshot: applyEvents(before, update.events) } });
   for (const event of update.events) {
     switch (event.type) {
       case "noteChanged":
         edit(event.note.id, { type: "changedOutside", body: event.note.body });
         break;
-      case "noteRemoved":
-        edit(event.note, { type: "removed" });
-        input({ type: "noteRemoved", note: event.note });
+      case "noteRemoved": {
+        const card = before.notes.find((note) => note.id === event.note);
+        if (card !== undefined) {
+          edit(event.note, { type: "removed", card });
+        }
+        if (!useWindow.getState().sessions.has(event.note)) {
+          input({ type: "noteRemoved", note: event.note });
+        }
         break;
+      }
       case "sectionsChanged":
       case "tagsChanged":
       case "straysChanged":
@@ -162,11 +171,50 @@ function settle(board: BoardId, note: NoteId, outcome: Outcome): void {
   }
 }
 
+function draftSection(card: NoteCard): DraftSection {
+  return card.section === null
+    ? { type: "noSection" }
+    : { type: "named", section: { type: "id", id: card.section } };
+}
+
+async function restore(note: NoteId, card: NoteCard, body: string): Promise<void> {
+  const snapshot = openSnapshot();
+  if (snapshot === null) {
+    return;
+  }
+  const answer = await call("apply", {
+    board: snapshot.board.id,
+    op: {
+      type: "addNote",
+      draft: { title: card.title, body, section: draftSection(card), tags: card.tags, source: "" },
+    },
+  });
+  switch (answer.kind) {
+    case "replied":
+      if (answer.reply.type === "applied") {
+        applyUpdate({
+          board: snapshot.board.id,
+          events: [{ type: "noteChanged", note: answer.reply.note }],
+        });
+      }
+      edit(note, { type: "restored" });
+      break;
+    case "failed":
+      edit(note, { type: "failed", message: answer.failure.message });
+      break;
+    default:
+      unreachable(answer);
+  }
+}
+
 function runEditEffect(note: NoteId, effect: EditEffect): void {
   switch (effect.type) {
     case "send":
       cancelSave(note);
       void save(effect.note, effect.base, effect.to);
+      break;
+    case "restore":
+      void restore(note, effect.card, effect.body);
       break;
     case "saveLater":
       cancelSave(note);
@@ -187,6 +235,9 @@ function runEditEffect(note: NoteId, effect: EditEffect): void {
     case "end":
       cancelSave(note);
       withSession(note, null);
+      if (openSnapshot()?.notes.some((card) => card.id === note) !== true) {
+        input({ type: "noteRemoved", note });
+      }
       break;
     case "notice":
       showNotice(effect.text);

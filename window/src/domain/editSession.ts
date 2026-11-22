@@ -1,3 +1,4 @@
+import type { NoteCard } from "../bindings/NoteCard";
 import type { NoteId } from "../bindings/NoteId";
 import { unreachable } from "./exhaustive";
 
@@ -5,7 +6,9 @@ export type EditPhase =
   | { readonly kind: "clean" }
   | { readonly kind: "dirty" }
   | { readonly kind: "saving"; readonly sent: string }
-  | { readonly kind: "conflict"; readonly theirs: string };
+  | { readonly kind: "conflict"; readonly theirs: string }
+  | { readonly kind: "removed"; readonly card: NoteCard }
+  | { readonly kind: "restoring"; readonly card: NoteCard };
 
 export type EditSession = {
   readonly note: NoteId;
@@ -23,12 +26,16 @@ export type EditEvent =
   | { readonly type: "conflict"; readonly current: string }
   | { readonly type: "failed"; readonly message: string }
   | { readonly type: "changedOutside"; readonly body: string }
-  | { readonly type: "removed" }
+  | { readonly type: "removed"; readonly card: NoteCard }
   | { readonly type: "keepMine" }
-  | { readonly type: "takeTheirs" };
+  | { readonly type: "takeTheirs" }
+  | { readonly type: "restore" }
+  | { readonly type: "restored" }
+  | { readonly type: "discard" };
 
 export type EditEffect =
   | { readonly type: "send"; readonly note: NoteId; readonly base: string; readonly to: string }
+  | { readonly type: "restore"; readonly card: NoteCard; readonly body: string }
   | { readonly type: "saveLater" }
   | { readonly type: "cancelSave" }
   | { readonly type: "stayOpen" }
@@ -77,6 +84,8 @@ function typed(session: EditSession, draft: string): EditStep {
         : { session: { ...session, draft, phase: DIRTY }, effects: [{ type: "saveLater" }] };
     case "saving":
     case "conflict":
+    case "removed":
+    case "restoring":
       return unchanged({ ...session, draft });
     default:
       return unreachable(phase);
@@ -117,9 +126,12 @@ function changedOutside(session: EditSession, body: string): EditStep {
     case "saving":
       return unchanged(session);
     case "conflict":
+    case "removed":
       return body === session.draft
         ? settled({ ...session, base: body, phase: CLEAN })
-        : unchanged({ ...session, phase: { kind: "conflict", theirs: body } });
+        : unchanged({ ...session, open: true, phase: { kind: "conflict", theirs: body } });
+    case "restoring":
+      return unchanged(session);
     default:
       return unreachable(phase);
   }
@@ -135,20 +147,40 @@ function closed(session: EditSession): EditStep {
     case "saving":
       return unchanged({ ...session, open: false });
     case "conflict":
+    case "removed":
+    case "restoring":
       return { session, effects: [{ type: "stayOpen" }] };
     default:
       return unreachable(phase);
   }
 }
 
-const LOST_TEXT = "Another program removed this note before your text was saved.";
-
-function removedEffects(session: EditSession): readonly EditEffect[] {
-  const end: EditEffect = { type: "end" };
-  if (session.draft === session.base) {
-    return [end];
+function removed(session: EditSession, card: NoteCard): EditStep {
+  if (session.draft === session.base || session.phase.kind === "restoring") {
+    return { session, effects: [{ type: "end" }] };
   }
-  return [end, { type: "notice", text: LOST_TEXT }];
+  return {
+    session: { ...session, open: true, phase: { kind: "removed", card } },
+    effects: [{ type: "cancelSave" }, { type: "stayOpen" }],
+  };
+}
+
+function failed(session: EditSession, message: string): EditStep {
+  const notice: EditEffect = { type: "notice", text: message };
+  switch (session.phase.kind) {
+    case "saving":
+      return {
+        session: { ...session, open: true, phase: DIRTY },
+        effects: [{ type: "stayOpen" }, notice],
+      };
+    case "restoring":
+      return {
+        session: { ...session, phase: { kind: "removed", card: session.phase.card } },
+        effects: [{ type: "stayOpen" }, notice],
+      };
+    default:
+      return unchanged(session);
+  }
 }
 
 export function stepEdit(session: EditSession, event: EditEvent): EditStep {
@@ -166,16 +198,11 @@ export function stepEdit(session: EditSession, event: EditEvent): EditStep {
         ? conflict(session, event.current)
         : unchanged(session);
     case "failed":
-      return session.phase.kind === "saving"
-        ? {
-            session: { ...session, open: true, phase: DIRTY },
-            effects: [{ type: "stayOpen" }, { type: "notice", text: event.message }],
-          }
-        : unchanged(session);
+      return failed(session, event.message);
     case "changedOutside":
       return changedOutside(session, event.body);
     case "removed":
-      return { session, effects: removedEffects(session) };
+      return removed(session, event.card);
     case "keepMine":
       return session.phase.kind === "conflict"
         ? send(session, session.phase.theirs)
@@ -192,6 +219,21 @@ export function stepEdit(session: EditSession, event: EditEvent): EditStep {
             effects: [],
           }
         : unchanged(session);
+    case "restore":
+      return session.phase.kind === "removed"
+        ? {
+            session: { ...session, phase: { kind: "restoring", card: session.phase.card } },
+            effects: [{ type: "restore", card: session.phase.card, body: session.draft }],
+          }
+        : unchanged(session);
+    case "restored":
+      return session.phase.kind === "restoring"
+        ? { session, effects: [{ type: "end" }] }
+        : unchanged(session);
+    case "discard":
+      return session.phase.kind === "removed"
+        ? { session, effects: [{ type: "end" }] }
+        : unchanged(session);
     default:
       return unreachable(event);
   }
@@ -206,21 +248,28 @@ export type CloseVerdict =
 export const KEPT_OPEN_FOR_CONFLICT =
   "Whiteboard did not quit: another program changed a note you are editing. Choose Keep mine or Take theirs first.";
 
+export const KEPT_OPEN_FOR_REMOVED =
+  "Whiteboard did not quit: another program removed a note that holds your typed text. Save it as a new note or discard it first.";
+
 export function closeVerdict(sessions: Iterable<EditSession>): CloseVerdict {
   const dirty: NoteId[] = [];
-  let conflicted = false;
+  let kept: string | null = null;
   for (const session of sessions) {
     const phase = session.phase;
     switch (phase.kind) {
       case "clean":
         break;
       case "saving":
+      case "restoring":
         return { kind: "wait" };
       case "dirty":
         dirty.push(session.note);
         break;
       case "conflict":
-        conflicted = true;
+        kept ??= KEPT_OPEN_FOR_CONFLICT;
+        break;
+      case "removed":
+        kept ??= KEPT_OPEN_FOR_REMOVED;
         break;
       default:
         unreachable(phase);
@@ -229,5 +278,5 @@ export function closeVerdict(sessions: Iterable<EditSession>): CloseVerdict {
   if (dirty.length > 0) {
     return { kind: "send", notes: dirty };
   }
-  return conflicted ? { kind: "stay", reason: KEPT_OPEN_FOR_CONFLICT } : { kind: "leave" };
+  return kept === null ? { kind: "leave" } : { kind: "stay", reason: kept };
 }

@@ -1,5 +1,6 @@
 import { type MouseEvent, useMemo, type WheelEvent } from "react";
 import type { BoardSnapshot } from "../bindings/BoardSnapshot";
+import { withKeptCards } from "../domain/board";
 import { layout } from "../domain/layout";
 import { input, pan, useWindow } from "../state/store";
 import { CardView } from "./CardView";
@@ -51,14 +52,16 @@ type Props = {
 export function Canvas({ snapshot, problem }: Props) {
   const heights = useWindow((state) => state.heights);
   const view = useWindow((state) => state.view);
-  const placed = useMemo(() => layout(snapshot, heights), [snapshot, heights]);
-  const cards = useMemo(() => new Map(snapshot.notes.map((note) => [note.id, note])), [snapshot]);
+  const sessions = useWindow((state) => state.sessions);
+  const shown = useMemo(() => withKeptCards(snapshot, sessions.values()), [snapshot, sessions]);
+  const placed = useMemo(() => layout(shown, heights), [shown, heights]);
+  const cards = useMemo(() => new Map(shown.notes.map((note) => [note.id, note])), [shown]);
 
   const onWheel = (event: WheelEvent) => pan(event.deltaX, event.deltaY);
   const onDoubleClick = (event: MouseEvent) => {
     const target = event.target instanceof Element ? event.target.closest("[data-card]") : null;
     const id = target?.getAttribute("data-card");
-    const card = snapshot.notes.find((note) => note.id === id);
+    const card = shown.notes.find((note) => note.id === id);
     if (card !== undefined) {
       input({ type: "doubleClicked", note: card.id });
     }

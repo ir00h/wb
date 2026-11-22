@@ -6,6 +6,7 @@ import { editOneOperation } from "./journeys/edit-one-operation.ts";
 import { look } from "./journeys/look.ts";
 import { outsideChanges } from "./journeys/outside-changes.ts";
 import { quitKeepsTypedText } from "./journeys/quit.ts";
+import { removedNote } from "./journeys/removed-note.ts";
 import { windowOpens } from "./journeys/window-opens.ts";
 
 export const JOURNEYS: readonly Journey[] = [
@@ -14,6 +15,7 @@ export const JOURNEYS: readonly Journey[] = [
   editOneOperation,
   outsideChanges,
   boardFolder,
+  removedNote,
   conflictTakeTheirs,
   conflictKeepMine,
   quitKeepsTypedText,
