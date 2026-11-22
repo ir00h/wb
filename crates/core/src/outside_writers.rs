@@ -786,13 +786,13 @@ fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
             .output()
             .expect("test run");
         let said = String::from_utf8_lossy(&run.stdout);
+        let failures = said
+            .split_once("\nfailures:\n")
+            .map_or(&*said, |(_, failures)| failures);
         assert!(
             run.status.success(),
-            "on a volume {volume} these tests failed:\n{}",
-            said.lines()
-                .filter(|line| line.contains("FAILED") || line.contains("panicked"))
-                .collect::<Vec<_>>()
-                .join("\n")
+            "on a volume {volume} these tests failed:\n{failures}\n{}",
+            String::from_utf8_lossy(&run.stderr)
         );
         assert!(
             said.contains(
