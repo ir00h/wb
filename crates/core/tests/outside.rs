@@ -278,6 +278,50 @@ fn a_title_change_never_renames_over_a_file_that_holds_the_new_name() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn a_note_that_is_a_link_is_listed_and_never_written_through_or_replaced() {
+    let scratch = Scratch::new("linked-note");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    let elsewhere = scratch.path().join("elsewhere.md");
+    let linked_text = "---\nid: nlink01\n---\n\n# Linked\n\nkept outside the board\n";
+    fs::write(&elsewhere, linked_text).expect("linked file");
+    let link = folder.join("linked-nlink01.md");
+    std::os::unix::fs::symlink(&elsewhere, &link).expect("link");
+    let id = wb_model::NoteId::parse("nlink01").expect("note id");
+
+    assert_eq!(
+        board.note(&id).expect("note").body,
+        "kept outside the board"
+    );
+    let answer = board.apply(common::append(&id, "added through the board"));
+
+    assert_eq!(
+        answer,
+        Err(wb_model::Error::NotAPlainFile {
+            path: link.display().to_string()
+        })
+    );
+    assert!(
+        fs::symlink_metadata(&link)
+            .expect("link")
+            .file_type()
+            .is_symlink(),
+        "the link was turned into a plain file"
+    );
+    assert_eq!(
+        fs::read_to_string(&elsewhere).expect("linked file"),
+        linked_text
+    );
+    let left: Vec<_> = fs::read_dir(folder.join(".locks"))
+        .expect("locks folder")
+        .map(|entry| entry.expect("entry").file_name())
+        .filter(|name| !name.to_string_lossy().ends_with(".lock"))
+        .collect();
+    assert_eq!(left, Vec::<std::ffi::OsString>::new());
+}
+
 #[test]
 fn every_outside_writer_is_also_seen_on_a_volume_without_an_exchange() {
     common::every_test_passes_again_without_an_exchange();

@@ -157,8 +157,8 @@ fn replace_unless_changed(
     read: &[u8],
     new: &[u8],
 ) -> io::Result<Replaced> {
-    let permissions = match fs::metadata(path) {
-        Ok(entry) if !entry.is_file() => return Ok(Replaced::NotAPlainFile),
+    let permissions = match fs::symlink_metadata(path) {
+        Ok(entry) if !entry.file_type().is_file() => return Ok(Replaced::NotAPlainFile),
         Ok(entry) => Some(entry.permissions()),
         Err(_) => None,
     };
