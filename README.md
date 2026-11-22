@@ -57,4 +57,10 @@ With the feature on, setting `WB_AUTOMATION_PORT` makes the shell listen on `127
 
 `WB_AUTOMATION_BACKGROUND=1` keeps the app from ever becoming the frontmost app and keeps the page rendering while the window is hidden behind others (macOS only). It needs `WB_AUTOMATION_PORT` too; without it the app refuses to start rather than start in the foreground. When the system's web view cannot keep a hidden window rendering, the app says why and exits instead of announcing the channel. With the channel on, the app exits by itself when the program whose process id is in `WB_AUTOMATION_RUNNER` ends, or, without that variable, the program that started it; the journey runner passes its own, so an app started through a wrapper still ends with the run. Journeys run in background mode; `WB_E2E_FOREGROUND=1` turns it off, as continuous integration does. `shell-default-clean` fails when the default shell binary contains any part of the channel.
 
+## Run the app on a scratch workspace
+
+After `cargo xtask check e2e` has built `target/debug/whiteboard-automation` and `target/debug/wb`, `node e2e/scratch-app.ts --garden` starts the app in background mode on a new temporary workspace holding the garden board, and prints one JSON line with the channel's address, the process ids, the workspace and the ids of the garden's sections and notes. It keeps running until the app quits or it receives SIGINT or SIGTERM, then stops the app and removes the workspace. `--session <file>` also writes that line to a file.
+
+`node e2e/poke.ts <address> <command>` acts on the running app: `window`, `doctor`, `eval <body>`, `type <text>`, `key <key>`, `click <selector> [count]`, `applied`, `snapshot <file>` and `quit`. Run it without arguments for the details.
+
 Code carries no comments. Say it in code: a name, a type, a test.

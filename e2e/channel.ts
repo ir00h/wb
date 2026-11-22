@@ -161,6 +161,8 @@ function watchFocus(pid: number): () => number {
 
 class ChannelApp implements RunningApp {
   readonly workspace: string;
+  readonly address: string;
+  readonly pid: number | null;
   readonly #base: string;
   readonly #child: ChildProcess;
   readonly #output: () => string;
@@ -174,6 +176,8 @@ class ChannelApp implements RunningApp {
     stopWatchingFocus: (() => number) | null,
   ) {
     this.workspace = workspace;
+    this.address = base;
+    this.pid = child.pid ?? null;
     this.#base = base;
     this.#child = child;
     this.#output = output;

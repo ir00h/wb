@@ -36,6 +36,8 @@ export type PageFunction<Args extends readonly unknown[], Result> = (
 
 export interface RunningApp {
   readonly workspace: string;
+  readonly address: string;
+  readonly pid: number | null;
   evaluate<Args extends readonly unknown[], Result>(
     fn: PageFunction<Args, Result>,
     ...args: Args
