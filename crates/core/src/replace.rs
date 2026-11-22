@@ -38,6 +38,7 @@ pub enum Replaced {
     Done,
     Changed { now: Vec<u8> },
     Gone,
+    NotAPlainFile,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,8 +134,20 @@ fn look(path: &Path, read: &[u8]) -> io::Result<Option<Replaced>> {
         Ok(on_disk) if on_disk == read => Ok(None),
         Ok(on_disk) => Ok(Some(Replaced::Changed { now: on_disk })),
         Err(error) if error.kind() == ErrorKind::NotFound => Ok(Some(Replaced::Gone)),
+        Err(error) if is_a_folder(&error) => Ok(Some(Replaced::NotAPlainFile)),
         Err(error) => Err(error),
     }
+}
+
+fn is_a_folder(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        ErrorKind::IsADirectory | ErrorKind::DirectoryNotEmpty
+    )
+}
+
+fn is_a_plain_file(path: &Path) -> bool {
+    fs::symlink_metadata(path).is_ok_and(|entry| entry.file_type().is_file())
 }
 
 fn replace_unless_changed(
@@ -145,11 +158,11 @@ fn replace_unless_changed(
     new: &[u8],
 ) -> io::Result<Replaced> {
     let permissions = match fs::metadata(path) {
-        Ok(replaced) => replaced.permissions(),
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
-        Err(error) => return Err(error),
+        Ok(entry) if !entry.is_file() => return Ok(Replaced::NotAPlainFile),
+        Ok(entry) => Some(entry.permissions()),
+        Err(_) => None,
     };
-    write_temporary(temporary, new, Some(permissions))?;
+    write_temporary(temporary, new, permissions)?;
     #[cfg(test)]
     hook::run(hook::Moment::BeforeTheLastLook, path);
     if let Some(stop) = look(path, read)? {
@@ -159,7 +172,11 @@ fn replace_unless_changed(
     hook::run(hook::Moment::AfterTheLastLook, path);
     match volume.replacement {
         Replacement::Exchange => exchange(temporary, path, read, new),
-        Replacement::RenameAfterALastLook => fs::rename(temporary, path).map(|()| Replaced::Done),
+        Replacement::RenameAfterALastLook => match fs::rename(temporary, path) {
+            Ok(()) => Ok(Replaced::Done),
+            Err(error) if is_a_folder(&error) => Ok(Replaced::NotAPlainFile),
+            Err(error) => Err(error),
+        },
     }
 }
 
@@ -168,6 +185,10 @@ fn exchange(temporary: &Path, path: &Path, read: &[u8], new: &[u8]) -> io::Resul
         Ok(()) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
         Err(error) => return Err(error),
+    }
+    if !is_a_plain_file(temporary) {
+        platform::exchange(temporary, path)?;
+        return Ok(Replaced::NotAPlainFile);
     }
     let mut put = new.to_vec();
     let mut taken_out = fs::read(temporary)?;

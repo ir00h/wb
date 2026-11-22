@@ -27,6 +27,10 @@ pub enum Error {
         files.join("`, `")
     )]
     DuplicateNote { note: NoteId, files: Vec<String> },
+    #[error(
+        "`{path}` is not a plain file, so nothing was written to it; put the file back in place of what is there and try again"
+    )]
+    NotAPlainFile { path: String },
     #[error("there is no section {section} on this board")]
     SectionNotFound { section: SectionRef },
     #[error("{problem}")]

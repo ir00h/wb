@@ -10,7 +10,7 @@ use wb_model::{
     text,
 };
 
-use crate::failure::{io_failure, kept_changing, lock_failure, malformed};
+use crate::failure::{io_failure, kept_changing, lock_failure, malformed, not_a_plain_file};
 use crate::folder::{self, Found};
 use crate::lock::{BoardLocks, Held, LockKey};
 use crate::replace::{
@@ -254,6 +254,9 @@ impl Board {
                 }
                 Replaced::Changed { .. } => {}
                 Replaced::Gone => return Err(Error::NoteNotFound { note: id.clone() }),
+                Replaced::NotAPlainFile => {
+                    return Err(not_a_plain_file(&self.folder.join(&found.name)));
+                }
             }
         }
         Err(kept_changing(&self.folder))

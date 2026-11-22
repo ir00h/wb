@@ -538,6 +538,49 @@ fn a_config_another_program_creates_at_the_last_moment_keeps_its_keys_and_the_se
 }
 
 #[test]
+fn a_folder_put_in_place_of_a_note_at_the_last_moment_gets_nothing_and_blocks_nothing() {
+    for moment in [Moment::BeforeTheLastLook, Moment::AfterTheLastLook] {
+        let garden = Garden::new("folder-in-place");
+        let note = garden.add_note("Weed the paths", "Before the rain.");
+        let file = garden.file_of(&note);
+        let before = fs::read(&file).expect("note file");
+        let aside = garden.folder().join("aside.bin");
+
+        let moved_aside = aside.clone();
+        at_the_next(moment, move |file| {
+            fs::rename(file, &moved_aside).expect("move aside");
+            fs::create_dir(file).expect("folder in its place");
+        });
+        let answer = garden.board.apply(append(&note.id, "After the rain."));
+
+        assert_eq!(
+            answer,
+            Err(Error::NotAPlainFile {
+                path: file.display().to_string()
+            }),
+            "{moment:?}"
+        );
+        assert!(
+            file.is_dir() && fs::read_dir(&file).expect("folder").next().is_none(),
+            "{moment:?}: the folder put in place of the note was changed"
+        );
+        assert_eq!(fs::read(&aside).expect("moved-aside note"), before);
+        assert_eq!(garden.left_in_the_locks_folder(), Vec::<String>::new());
+
+        fs::remove_dir(&file).expect("folder removed");
+        fs::rename(&aside, &file).expect("note put back");
+        garden
+            .board
+            .apply(append(&note.id, "Later."))
+            .expect("the next edit");
+        assert_eq!(
+            garden.board.note(&note.id).expect("note").body,
+            "Before the rain.\n\nLater."
+        );
+    }
+}
+
+#[test]
 fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
     if std::env::var_os(VOLUME).is_some() {
         return;

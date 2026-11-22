@@ -26,6 +26,12 @@ pub fn not_text(path: &Path) -> impl Fn(std::str::Utf8Error) -> Error {
     }
 }
 
+pub fn not_a_plain_file(path: &Path) -> Error {
+    Error::NotAPlainFile {
+        path: path.display().to_string(),
+    }
+}
+
 pub fn kept_changing(path: &Path) -> Error {
     Error::Io {
         path: path.display().to_string(),

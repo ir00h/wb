@@ -6,7 +6,7 @@ use std::time::Duration;
 
 use wb_model::{BoardConfig, CONFIG_FILE, Error};
 
-use crate::failure::{io_failure, kept_changing, malformed, not_text};
+use crate::failure::{io_failure, kept_changing, malformed, not_a_plain_file, not_text};
 use crate::lock::Held;
 use crate::replace::{Created, Replaced, Target, create_new, replace_if_unchanged};
 
@@ -79,6 +79,7 @@ pub fn change<T>(
         };
         on_disk = match replaced {
             Replaced::Done => return Ok(answer),
+            Replaced::NotAPlainFile => return Err(not_a_plain_file(&path)),
             Replaced::Changed { now } if !is_blank(&now) => Some(now),
             Replaced::Changed { .. } | Replaced::Gone => read_when_settled(&path)?,
         };
