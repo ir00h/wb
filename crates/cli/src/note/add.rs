@@ -1,8 +1,8 @@
 use serde::Serialize;
-use wb_model::{DraftSection, NoteDraft, Op, Outcome};
+use wb_model::{DraftSection, Error, Invalid, NoteDraft, Op, Outcome, Tag};
 
 use crate::context::{BoardRef, Context};
-use crate::error::{Result, fail};
+use crate::error::{Failure, Result, fail};
 use crate::notes::{section_of, tag_names};
 use crate::section;
 
@@ -45,6 +45,16 @@ fn draft_section(board: &BoardRef, named: Option<&str>) -> Result<DraftSection> 
     }
 }
 
+fn malformed_tag(given: &[String], tag: &str) -> Failure {
+    let written = given
+        .iter()
+        .find(|text| Tag::new(text).is_some_and(|normal| normal.as_str() == tag))
+        .map_or(tag, String::as_str);
+    Failure(format!(
+        "\"{written}\" is not a well-formed tag: use lowercase words joined by -, with / for a namespace, like plan or ticket/abc-12"
+    ))
+}
+
 pub fn add(cx: &Context, request: NewNote) -> Result<Added> {
     let board = cx.board()?;
     let mut body = request.body.unwrap_or_default();
@@ -58,14 +68,25 @@ pub fn add(cx: &Context, request: NewNote) -> Result<Added> {
             None => String::new(),
         },
     };
+    let tags = request.tags;
     let draft = NoteDraft {
         title,
         body,
         section: draft_section(&board, request.section.as_deref())?,
-        tags: request.tags,
+        tags: tags.clone(),
         source: request.source,
     };
-    let Outcome::Applied { note } = board.board.apply(Op::AddNote { draft })? else {
+    let Outcome::Applied { note } =
+        board
+            .board
+            .apply(Op::AddNote { draft })
+            .map_err(|error| match error {
+                Error::Invalid {
+                    problem: Invalid::MalformedTag { tag },
+                } => malformed_tag(&tags, &tag),
+                other => Failure::from(other),
+            })?
+    else {
         fail!("the note was written but cannot be read back")
     };
     let file = board.board.note_file(&note.id)?;
