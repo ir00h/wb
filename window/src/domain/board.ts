@@ -1,5 +1,6 @@
 import type { BoardEvent } from "../bindings/BoardEvent";
 import type { BoardSnapshot } from "../bindings/BoardSnapshot";
+import { unreachable } from "./exhaustive";
 
 export function applyEvent(snapshot: BoardSnapshot, event: BoardEvent): BoardSnapshot {
   switch (event.type) {
@@ -20,10 +21,8 @@ export function applyEvent(snapshot: BoardSnapshot, event: BoardEvent): BoardSna
       return { ...snapshot, tags: event.tags };
     case "straysChanged":
       return { ...snapshot, strays: event.strays };
-    default: {
-      const unknown: never = event;
-      return unknown;
-    }
+    default:
+      return unreachable(event);
   }
 }
 

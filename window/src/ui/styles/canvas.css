@@ -1,0 +1,200 @@
+.canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--canvas);
+  cursor: grab;
+  touch-action: none;
+}
+.dots {
+  position: absolute;
+  inset: -80px;
+  background-image: radial-gradient(#1c1c1c 1px, transparent 1.2px);
+  background-size: 26px 26px;
+  pointer-events: none;
+  will-change: transform;
+}
+.world {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.tinted {
+  --kind-colour: var(--hue-ink);
+}
+
+.section {
+  --section-ink: var(--hue-ink);
+  position: absolute;
+  border-radius: 18px;
+  background: var(--hue-fill-step);
+  transition: box-shadow var(--motion) var(--ease-out);
+}
+.section:hover {
+  box-shadow: 0 0 0 1.5px var(--hue-ring);
+}
+.section-header {
+  position: absolute;
+  inset: auto 0 100% 0;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 0 6px 7px;
+}
+.section-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  color: var(--section-ink);
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.section-note {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  color: color-mix(in srgb, var(--section-ink) 75%, transparent);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card {
+  position: absolute;
+  z-index: 1000;
+  contain: layout style;
+  padding: 10px 12px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  cursor: default;
+  transition:
+    border-color var(--motion) var(--ease-out),
+    box-shadow var(--motion) var(--ease-out);
+}
+.card:hover {
+  border-color: #3a3a3a;
+  box-shadow: 0 6px 18px -8px #000c;
+}
+.card.editing {
+  z-index: 1001;
+  border-color: var(--accent);
+  outline: 1px solid var(--accent);
+  box-shadow: 0 0 0 2px #000;
+}
+.card-tag {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+.card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 9px;
+  min-width: 0;
+}
+.card-tag b {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.card-tag b.coloured {
+  color: color-mix(in srgb, var(--kind-colour, var(--dim)) 85%, #fff);
+  margin-left: -2px;
+  padding: 0.5px 7px 0.5px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--kind-colour, var(--dim)) 14%, transparent);
+}
+.card-tag b.coloured::before {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--kind-colour, var(--dim));
+  vertical-align: 1.5px;
+}
+.card-title {
+  margin: 4px 0 3px;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+.card-body {
+  max-height: 13.2em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(#000 11.4em, transparent 13.2em);
+  mask-image: linear-gradient(#000 11.4em, transparent 13.2em);
+  font-size: 13px;
+  opacity: 0.82;
+}
+
+.card-editor {
+  display: block;
+  width: 100%;
+  min-height: 7em;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  outline: none;
+  resize: none;
+  font-size: 13px;
+  line-height: 1.45;
+  field-sizing: content;
+}
+.conflict {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.conflict-label {
+  margin: 0 0 4px;
+  color: var(--warning);
+  font-size: 11px;
+  font-weight: 600;
+}
+.conflict-theirs {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--soft-line);
+  border-radius: var(--radius-sm);
+  background: var(--field-bg);
+  color: var(--muted);
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.conflict-actions {
+  display: flex;
+  gap: 6px;
+}
+.conflict-actions button {
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+}
+.conflict-actions button:hover {
+  border-color: var(--accent);
+}

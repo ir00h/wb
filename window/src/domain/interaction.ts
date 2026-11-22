@@ -1,4 +1,5 @@
 import type { NoteId } from "../bindings/NoteId";
+import { unreachable } from "./exhaustive";
 
 export type Interaction =
   | { readonly kind: "idle" }
@@ -31,10 +32,8 @@ function leave(state: Interaction): Step {
       return stay(state);
     case "editing":
       return { state: IDLE, effects: [{ type: "editorClosed", note: state.note }] };
-    default: {
-      const unknown: never = state;
-      return unknown;
-    }
+    default:
+      return unreachable(state);
   }
 }
 
@@ -63,9 +62,7 @@ export function step(state: Interaction, event: InputEvent): Step {
       return leave(state);
     case "noteRemoved":
       return state.kind === "editing" && state.note === event.note ? leave(state) : stay(state);
-    default: {
-      const unknown: never = event;
-      return unknown;
-    }
+    default:
+      return unreachable(event);
   }
 }

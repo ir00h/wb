@@ -47,10 +47,19 @@ export const windowOpens: Journey = {
       "the page is not rendering: it is hidden or draws no animation frame",
     );
 
-    const lines = await app.evaluate(() =>
-      Array.from(document.querySelectorAll("main > *"), (node) => node.textContent ?? ""),
+    const notice = await app.waitFor(
+      () => document.querySelector(".notice:not(:empty)")?.textContent?.includes("board") ?? false,
+      { timeout: 5_000 },
     );
-    assert.deepEqual(lines, [PRODUCT_NAME, "No board open", "Desktop shell"]);
+    assert.equal(notice, true);
+    const lines = await app.evaluate(() =>
+      Array.from(document.querySelectorAll(".title-bar h1, .notice"), (node) => node.textContent),
+    );
+    assert.deepEqual(
+      lines,
+      [PRODUCT_NAME, "this workspace has no board yet; make one with `wb board add`"],
+      "the window did not show the shell's answer for a workspace without a board",
+    );
 
     const heading = await app.evaluate(() => {
       const heading = document.querySelector("h1");

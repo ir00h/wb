@@ -1,4 +1,5 @@
 import type { NoteId } from "../bindings/NoteId";
+import { unreachable } from "./exhaustive";
 
 export type EditPhase =
   | { readonly kind: "clean" }
@@ -77,10 +78,8 @@ function typed(session: EditSession, draft: string): EditStep {
     case "saving":
     case "conflict":
       return unchanged({ ...session, draft });
-    default: {
-      const unknown: never = phase;
-      return unknown;
-    }
+    default:
+      return unreachable(phase);
   }
 }
 
@@ -121,10 +120,8 @@ function changedOutside(session: EditSession, body: string): EditStep {
       return body === session.draft
         ? settled({ ...session, base: body, phase: CLEAN })
         : unchanged({ ...session, phase: { kind: "conflict", theirs: body } });
-    default: {
-      const unknown: never = phase;
-      return unknown;
-    }
+    default:
+      return unreachable(phase);
   }
 }
 
@@ -139,10 +136,8 @@ function closed(session: EditSession): EditStep {
       return unchanged({ ...session, open: false });
     case "conflict":
       return { session, effects: [{ type: "stayOpen" }] };
-    default: {
-      const unknown: never = phase;
-      return unknown;
-    }
+    default:
+      return unreachable(phase);
   }
 }
 
@@ -197,9 +192,7 @@ export function stepEdit(session: EditSession, event: EditEvent): EditStep {
             effects: [],
           }
         : unchanged(session);
-    default: {
-      const unknown: never = event;
-      return unknown;
-    }
+    default:
+      return unreachable(event);
   }
 }

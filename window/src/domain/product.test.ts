@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import type { BoardId } from "../bindings/BoardId";
 import { PRODUCT_NAME, windowTitle } from "./product";
 
 describe("windowTitle", () => {
@@ -8,6 +7,6 @@ describe("windowTitle", () => {
   });
 
   it("names the open board before the product", () => {
-    expect(windowTitle("kitchen/recipes" as BoardId)).toBe("kitchen/recipes · Whiteboard");
+    expect(windowTitle("Kitchen recipes")).toBe("Kitchen recipes · Whiteboard");
   });
 });
