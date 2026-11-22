@@ -5,8 +5,8 @@ use serde::Serialize;
 use serde_json::Value;
 use wb_core::NoteFile;
 use wb_model::{
-    BoardConfig, Error, Invalid, Op, Outcome, SectionId, SectionNode, SectionRef, SectionTree,
-    same_section_name,
+    BoardConfig, Error, HUE_MAX, HUE_MIN, Invalid, Op, Outcome, SectionId, SectionNode, SectionRef,
+    SectionTree, same_section_name,
 };
 
 use crate::context::{BoardRef, Context};
@@ -27,7 +27,7 @@ pub enum SectionCommand {
     #[command(
         about = "Add a section. The app draws its box",
         long_about = "Add a section to the board's config. The app draws its box, inside its parent's. Sibling sections may not share a name.\n\nJSON: {id, name, path, parent}",
-        after_long_help = "Examples:\n  wb --workspace boards --board garden section add Beds\n  wb --workspace boards --board garden section add Spring --parent Beds"
+        after_long_help = "Examples:\n  wb --workspace boards --board garden section add Beds --hue 120\n  wb --workspace boards --board garden section add Spring --parent Beds --note \"Started indoors\""
     )]
     Add {
         #[arg(help = "The section's name")]
@@ -38,14 +38,32 @@ pub enum SectionCommand {
             help = "The section to put it in: a path like `Beds / Spring`, or an id"
         )]
         parent: Option<String>,
+        #[arg(long, help = "A line shown under the section's name")]
+        note: Option<String>,
+        #[arg(
+            long,
+            help = "Its colour, as a hue from 0 to 360 [default: the app picks one]"
+        )]
+        hue: Option<f64>,
     },
 }
 
 pub fn run(cx: &Context, command: SectionCommand) -> Result<()> {
     match command {
         SectionCommand::List => emit(cx.json, &list(cx)?[..], render_list),
-        SectionCommand::Add { name, parent } => {
-            emit(cx.json, &add(cx, &name, parent.as_deref())?, render_added)
+        SectionCommand::Add {
+            name,
+            parent,
+            note,
+            hue,
+        } => {
+            let request = NewSection {
+                name,
+                parent,
+                note: note.unwrap_or_default(),
+                hue,
+            };
+            emit(cx.json, &add(cx, request)?, render_added)
         }
     }
 }
@@ -219,9 +237,16 @@ pub struct AddedSection {
     pub parent: Option<String>,
 }
 
-fn add(cx: &Context, name: &str, parent: Option<&str>) -> Result<AddedSection> {
+pub struct NewSection {
+    pub name: String,
+    pub parent: Option<String>,
+    pub note: String,
+    pub hue: Option<f64>,
+}
+
+fn add(cx: &Context, request: NewSection) -> Result<AddedSection> {
     let board = cx.board()?;
-    let parent = match parent {
+    let parent = match request.parent.as_deref() {
         Some(text) => Some(named(&board.sections()?, text)?),
         None => None,
     };
@@ -230,15 +255,21 @@ fn add(cx: &Context, name: &str, parent: Option<&str>) -> Result<AddedSection> {
         _ => None,
     };
     let op = Op::AddSection {
-        name: name.to_owned(),
+        name: request.name,
         parent,
-        note: String::new(),
-        hue: None,
+        note: request.note,
+        hue: request.hue,
     };
     let outcome = board.board.apply(op).map_err(|error| match error {
         Error::Invalid {
             problem: Invalid::SectionNameTaken { name },
         } => name_taken(&board, &name, parent_id.as_ref()),
+        Error::Invalid {
+            problem: Invalid::HueOutOfRange,
+        } => Failure(format!(
+            "a hue is a number from {HUE_MIN} to {HUE_MAX}, not {}",
+            request.hue.unwrap_or_default()
+        )),
         other => Failure::from(other),
     })?;
     let Outcome::SectionAdded { section } = outcome else {

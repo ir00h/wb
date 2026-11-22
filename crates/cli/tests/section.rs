@@ -143,10 +143,73 @@ fn section_add_refuses_sibling_names_missing_parents_and_empty_names() {
         run.stderr,
         "There is no section \"Shed\" on this board; the board has no sections yet.\n"
     );
-    let hue = scratch.wb(&[
-        "--board", "garden", "section", "add", "Roses", "--hue", "120",
+}
+
+#[test]
+fn section_add_keeps_a_note_and_a_hue_and_refuses_a_hue_out_of_range() {
+    let scratch = Scratch::new("section-note-hue");
+    scratch.wb(&["board", "add", "garden"]).ok();
+    let added = scratch
+        .wb(&[
+            "--board",
+            "garden",
+            "section",
+            "add",
+            "Seed trays",
+            "--note",
+            "Started indoors",
+            "--hue",
+            "120",
+            "--json",
+        ])
+        .ok();
+    let trays = text_of(&added.json(), "id");
+    assert_eq!(
+        scratch.normalise(&added.stdout, &[("sTRAYS0", &trays)]),
+        "{\n  \"id\": \"sTRAYS0\",\n  \"name\": \"Seed trays\",\n  \"path\": \"Seed trays\",\n  \"parent\": null\n}\n"
+    );
+    let config = scratch.read("garden/board.config.json");
+    assert_eq!(
+        scratch.normalise(&config, &[("sTRAYS0", &trays)]),
+        "{
+  \"version\": 1,
+  \"sections\": [
+    {
+      \"id\": \"sTRAYS0\",
+      \"name\": \"Seed trays\",
+      \"note\": \"Started indoors\",
+      \"hue\": 120
+    }
+  ]
+}
+"
+    );
+    let rows = scratch
+        .wb(&["--board", "garden", "section", "list", "--json"])
+        .ok()
+        .json();
+    assert_eq!(rows[0]["note"], "Started indoors");
+    assert_eq!(rows[0]["hue"], serde_json::json!(120.0));
+
+    let before = scratch.tree();
+    let out_of_range = scratch.wb(&[
+        "--board", "garden", "section", "add", "Roses", "--hue", "400",
     ]);
-    assert_eq!(hue.code, 2);
+    assert_eq!(out_of_range.code, 1);
+    assert_eq!(out_of_range.stdout, "");
+    assert_eq!(
+        out_of_range.stderr,
+        "A hue is a number from 0 to 360, not 400.\n"
+    );
+    let not_a_number = scratch.wb(&[
+        "--board", "garden", "section", "add", "Roses", "--hue", "red",
+    ]);
+    assert_eq!(not_a_number.code, 2);
+    assert_eq!(
+        not_a_number.stderr,
+        "error: invalid value 'red' for '--hue <HUE>': invalid float literal\n\nFor more information, try '--help'.\n"
+    );
+    assert_eq!(scratch.tree(), before);
 }
 
 #[test]
