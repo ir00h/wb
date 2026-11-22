@@ -97,6 +97,8 @@ pub fn create_new(held: &Held, target: Target, new: &[u8]) -> io::Result<Created
 pub fn rename_note(held: &Held, id: &NoteId, from: &str, to: &str) -> io::Result<Renamed> {
     held.temporary_file(&LockKey::Note(id.clone()))?;
     let (from, to) = (held.board().join(from), held.board().join(to));
+    #[cfg(test)]
+    hook::run(hook::Moment::BeforeTheRename, &from);
     let renamed = match held.volume().creation {
         Creation::RenameWithoutReplacing => platform::rename_without_replacing(&from, &to),
         Creation::HardLink => fs::hard_link(&from, &to).and_then(|()| fs::remove_file(&from)),
@@ -249,6 +251,7 @@ pub mod hook {
         BeforeTheLastLook,
         AfterTheLastLook,
         BeforeTheCreation,
+        BeforeTheRename,
     }
 
     thread_local! {

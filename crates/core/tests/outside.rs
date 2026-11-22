@@ -326,3 +326,38 @@ fn a_note_that_is_a_link_is_listed_and_never_written_through_or_replaced() {
 fn every_outside_writer_is_also_seen_on_a_volume_without_an_exchange() {
     common::every_test_passes_again_without_an_exchange();
 }
+
+#[test]
+fn every_outside_writer_is_also_seen_on_a_volume_with_hard_links_only() {
+    common::every_test_passes_again_on("hard-links-only");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_config_that_is_a_link_is_never_replaced() {
+    let scratch = Scratch::new("linked-config");
+    let board = scratch.garden();
+    let elsewhere = scratch.path().join("elsewhere.json");
+    fs::write(&elsewhere, "{\n  \"version\": 1\n}\n").expect("linked config");
+    let config = scratch.path().join("garden").join(CONFIG_FILE);
+    std::os::unix::fs::symlink(&elsewhere, &config).expect("link");
+
+    let answer = board.apply(add_section("Beds"));
+
+    assert_eq!(
+        answer,
+        Err(wb_model::Error::NotAPlainFile {
+            path: config.display().to_string()
+        })
+    );
+    assert!(
+        fs::symlink_metadata(&config)
+            .expect("link")
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(
+        fs::read_to_string(&elsewhere).expect("linked config"),
+        "{\n  \"version\": 1\n}\n"
+    );
+}

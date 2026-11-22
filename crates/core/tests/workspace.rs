@@ -504,3 +504,20 @@ fn a_board_gives_its_name_and_config_as_a_snapshot_reads_them_and_writes_nothing
         "reading the name or the config wrote a file"
     );
 }
+
+#[test]
+fn a_new_board_never_takes_a_folder_of_its_name_that_holds_other_files() {
+    let scratch = Scratch::new("folder-of-its-name");
+    let theirs = scratch.path().join("garden");
+    fs::create_dir_all(&theirs).expect("their folder");
+    fs::write(theirs.join("plant-list.txt"), "Tomatoes\n").expect("their file");
+
+    let garden = scratch
+        .workspace()
+        .add_board("Garden", None)
+        .expect("board");
+
+    assert_eq!(garden.id, board_id("garden-2"));
+    assert!(!theirs.join("board.json").exists());
+    assert!(!theirs.join(".locks").exists());
+}

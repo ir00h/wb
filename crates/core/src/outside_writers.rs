@@ -601,6 +601,44 @@ fn a_new_board_never_takes_a_folder_whose_board_file_another_program_wrote_first
 }
 
 #[test]
+fn a_note_trashed_between_its_new_text_and_its_new_name_stays_in_the_trash() {
+    let garden = Garden::new("trashed-before-the-rename");
+    let note = garden.add_note("Tomato plan", "Six plants.");
+    let file = garden.file_of(&note);
+
+    at_the_next(Moment::BeforeTheRename, |file| {
+        move_to_the_trash(file);
+    });
+    let answer = garden.board.apply(Op::EditNote {
+        note: note.id.clone(),
+        edit: NoteEdit {
+            title: Some(Change {
+                base: Some("Tomato plan".to_owned()),
+                to: "Tomato plan 2027".to_owned(),
+            }),
+            body: None,
+        },
+    });
+
+    assert_eq!(
+        answer,
+        Err(Error::NoteNotFound {
+            note: note.id.clone()
+        })
+    );
+    assert_eq!(garden.board.notes().expect("notes"), Vec::new());
+    let trashed = garden
+        .folder()
+        .join(TRASH_FOLDER)
+        .join(file.file_name().expect("file name"));
+    assert!(
+        fs::read_to_string(trashed)
+            .expect("trashed note")
+            .contains("# Tomato plan 2027")
+    );
+}
+
+#[test]
 fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
     if std::env::var_os(VOLUME).is_some() {
         return;

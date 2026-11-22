@@ -23,6 +23,7 @@ fn volume_under_test() -> Option<Volume> {
     match std::env::var(VOLUME).as_deref() {
         Err(_) => None,
         Ok("without-exchange") => Some(Volume::WITHOUT_EXCHANGE),
+        Ok("hard-links-only") => Some(Volume::WITH_HARD_LINKS_ONLY),
         Ok(other) => panic!("no volume called {other}"),
     }
 }
@@ -36,17 +37,21 @@ pub fn open_workspace(root: &Path) -> Workspace {
 }
 
 pub fn every_test_passes_again_without_an_exchange() {
+    every_test_passes_again_on("without-exchange");
+}
+
+pub fn every_test_passes_again_on(volume: &str) {
     if std::env::var_os(VOLUME).is_some() {
         return;
     }
     let run = Command::new(std::env::current_exe().expect("test binary"))
-        .env(VOLUME, "without-exchange")
+        .env(VOLUME, volume)
         .output()
         .expect("test run");
     let said = String::from_utf8_lossy(&run.stdout);
     assert!(
         run.status.success(),
-        "on a volume without an exchange these tests failed:\n{}",
+        "on a volume {volume} these tests failed:\n{}",
         said.lines()
             .filter(|line| line.contains("FAILED") || line.contains("panicked"))
             .collect::<Vec<_>>()
