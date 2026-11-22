@@ -383,34 +383,47 @@ fn the_temporary_file_of_a_killed_writer_is_no_note_and_goes_with_the_next_write
 fn taking_a_lock_removes_what_a_killed_holder_of_that_lock_left() {
     let garden = Garden::new("leftovers");
     let note = garden.add_note("Plant list", "Tomatoes");
-    let locks = garden.folder().join(LOCKS_FOLDER);
-    let of_this_note = locks.join(format!("{}.tmp", note.id));
-    let of_another_note = locks.join("n0ther1.tmp");
-    let of_the_config = locks.join("board.config.tmp");
-    for left in [&of_this_note, &of_another_note, &of_the_config] {
+    let locks = locks_of(&garden.folder());
+    drop(
+        locks
+            .acquire(&[LockKey::Config], AT_ONCE)
+            .expect("config lock"),
+    );
+    let folder = garden.folder().join(LOCKS_FOLDER);
+    let in_locks = |name: &str| folder.join(name).display().to_string();
+    let of_this_note = [
+        in_locks(&format!("{}.probe", note.id)),
+        in_locks(&format!("{}.tmp", note.id)),
+    ];
+    let of_the_config = [in_locks("board.config.probe"), in_locks("board.config.tmp")];
+    let of_another_note = [in_locks("n0ther1.probe"), in_locks("n0ther1.tmp")];
+    for left in of_this_note
+        .iter()
+        .chain(&of_the_config)
+        .chain(&of_another_note)
+    {
         fs::write(left, "half a file").expect("left file");
     }
 
     drop(
-        locks_of(&garden.folder())
+        locks
             .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
             .expect("note lock"),
     );
     assert_eq!(
         garden.left_in_the_locks_folder(),
-        [
-            of_the_config.display().to_string(),
-            of_another_note.display().to_string()
-        ]
+        [of_the_config.clone(), of_another_note.clone()].concat(),
+        "taking the lock of the note kept what a killed holder of it left"
     );
     drop(
-        locks_of(&garden.folder())
+        locks
             .acquire(&[LockKey::Config], AT_ONCE)
             .expect("config lock"),
     );
     assert_eq!(
         garden.left_in_the_locks_folder(),
-        [of_another_note.display().to_string()]
+        of_another_note.to_vec(),
+        "taking the lock of the config kept what a killed holder of it left"
     );
 }
 
@@ -478,6 +491,83 @@ fn an_outside_edit_of_the_same_length_is_a_conflict() {
 }
 
 #[test]
+fn an_append_keeps_a_paragraph_another_program_added_at_the_end_at_the_last_moment() {
+    let garden = Garden::new("outside-adds-at-the-end");
+    let note = garden.add_note("Harvest log", "Monday: peas.");
+    let file = garden.file_of(&note);
+    let outside = fs::read_to_string(&file).expect("note file") + "\nWednesday: leeks.\n";
+
+    let written_outside = outside.clone();
+    when_the_core_can_still_see_it(move |file| {
+        fs::write(file, written_outside).expect("outside edit");
+    });
+    let answer = garden.board.apply(append(&note.id, "Tuesday: kale."));
+
+    let now = fs::read_to_string(&file).expect("note file");
+    assert_eq!(
+        now,
+        outside.clone() + "\nTuesday: kale.\n",
+        "the paragraph another program added at the end is gone, answered {answer:?}"
+    );
+    assert!(
+        matches!(&answer, Ok(Outcome::Applied { note }) if note.body == "Monday: peas.\n\nWednesday: leeks.\n\nTuesday: kale."),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn an_append_keeps_an_outside_change_of_the_same_length_at_the_start() {
+    let garden = Garden::new("same-length-at-the-start");
+    let note = garden.add_note(
+        "Tomato plan",
+        "Six plants in the long bed by the south wall.",
+    );
+    let file = garden.file_of(&note);
+    let outside = fs::read_to_string(&file)
+        .expect("note file")
+        .replace("# Tomato plan", "# Potato plan");
+
+    let written_outside = outside.clone();
+    when_the_core_can_still_see_it(move |file| {
+        fs::write(file, written_outside).expect("outside edit");
+    });
+    let answer = garden.board.apply(append(&note.id, "And basil."));
+
+    let now = fs::read_to_string(garden.file_of(&note)).expect("note file");
+    assert!(
+        now.contains(
+            "# Potato plan\n\nSix plants in the long bed by the south wall.\n\nAnd basil.\n"
+        ),
+        "the title another program wrote is gone, answered {answer:?}; the file reads\n{now}"
+    );
+    assert!(
+        matches!(&answer, Ok(Outcome::Applied { note }) if note.title == "Potato plan"),
+        "{answer:?}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn an_edit_that_cannot_land_answers_an_error_and_writes_nothing() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let garden = Garden::new("cannot-land");
+    let note = garden.add_note("Harvest log", "Monday: peas.");
+    let file = garden.file_of(&note);
+    let before = fs::read(&file).expect("note file");
+    fs::set_permissions(garden.folder(), fs::Permissions::from_mode(0o555)).expect("read-only");
+
+    let answer = garden.board.apply(append(&note.id, "Tuesday: kale."));
+
+    fs::set_permissions(garden.folder(), fs::Permissions::from_mode(0o755)).expect("writable");
+    assert_eq!(fs::read(&file).expect("note file"), before);
+    assert!(
+        matches!(answer, Err(Error::Io { .. })),
+        "nothing was written, but the append answered {answer:?}"
+    );
+}
+
+#[test]
 fn a_config_emptied_at_the_last_moment_is_waited_out_and_never_taken_as_empty() {
     let garden = Garden::new("blank-at-the-last-look");
     let config = garden.folder().join(CONFIG_FILE);
@@ -506,6 +596,43 @@ fn a_config_emptied_at_the_last_moment_is_waited_out_and_never_taken_as_empty() 
     assert!(
         now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
         "the config the editor was saving was replaced by an empty one with the section:\n{now}"
+    );
+    assert!(
+        matches!(answer, Ok(Outcome::SectionAdded { .. })),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn a_config_holding_only_white_space_at_the_last_moment_is_waited_out_and_never_taken_as_empty() {
+    let garden = Garden::new("white-space-at-the-last-look");
+    let config = garden.folder().join(CONFIG_FILE);
+    let saved = "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n";
+    fs::write(&config, saved).expect("config");
+    let saving = config.clone();
+    let (start, started) = std::sync::mpsc::channel::<()>();
+    let editor = std::thread::spawn(move || {
+        started.recv().expect("start");
+        std::thread::sleep(Duration::from_millis(40));
+        fs::write(saving, saved).expect("editor save");
+    });
+
+    when_the_core_can_still_see_it(move |config| {
+        fs::write(config, "\n").expect("the editor leaves one empty line");
+        start.send(()).expect("start");
+    });
+    let answer = garden.board.apply(Op::AddSection {
+        name: "Beds".to_owned(),
+        parent: None,
+        note: String::new(),
+        hue: None,
+    });
+    editor.join().expect("editor");
+
+    let now = fs::read_to_string(&config).expect("config");
+    assert!(
+        now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
+        "the config the editor was saving was replaced by an empty one with the section, answered {answer:?}:\n{now}"
     );
     assert!(
         matches!(answer, Ok(Outcome::SectionAdded { .. })),

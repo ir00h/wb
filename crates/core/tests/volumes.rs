@@ -1,15 +1,19 @@
 mod common;
 
-use std::fs;
+use std::fs::{self, File};
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 use common::{Scratch, add_note, add_section, append, set_body, set_title};
 use wb_core::Workspace;
-use wb_model::{CONFIG_FILE, Outcome};
+use wb_model::{CONFIG_FILE, Error, NoteDraft, Op, Outcome};
 
 const IMAGE_SIZE: &str = "64m";
 const VOLUME_NAME: &str = "GARDEN";
+const ROOM_LEFT: usize = 256 * 1024;
+const FILLER_CHUNK: usize = 1024 * 1024;
+const TOO_BIG_FOR_THE_ROOM_LEFT: usize = 2 * 1024 * 1024;
 
 struct Mounted {
     device: String,
@@ -87,6 +91,22 @@ fn mount(folder: &Path, file_system: &str) -> Mounted {
     Mounted { device, point }
 }
 
+fn fill_all_but_a_little_room(volume: &Path) {
+    let room = volume.join("room");
+    fs::write(&room, vec![0_u8; ROOM_LEFT]).expect("room kept free");
+    let mut filler = File::create(volume.join("filler")).expect("filler");
+    let chunk = vec![0_u8; FILLER_CHUNK];
+    loop {
+        match filler.write_all(&chunk) {
+            Ok(()) => {}
+            Err(error) if error.kind() == ErrorKind::StorageFull => break,
+            Err(error) => panic!("filling the volume failed: {error}"),
+        }
+    }
+    drop(filler);
+    fs::remove_file(room).expect("room freed");
+}
+
 fn a_board_keeps_exactly_what_was_written(file_system: &str) {
     let scratch = Scratch::new(&format!("volume-{}", file_system.replace(' ', "-")));
     let mounted = mount(scratch.path(), file_system);
@@ -138,6 +158,25 @@ fn a_board_keeps_exactly_what_was_written(file_system: &str) {
     );
     let notes = board.notes().expect("notes");
     assert_eq!(notes.len(), 1, "{file_system}: the board holds {notes:?}");
+
+    fill_all_but_a_little_room(&mounted.point);
+    let big = board.apply(Op::AddNote {
+        draft: NoteDraft {
+            title: "Seed catalogue".to_owned(),
+            body: "a".repeat(TOO_BIG_FOR_THE_ROOM_LEFT),
+            ..NoteDraft::default()
+        },
+    });
+    assert!(
+        matches!(big, Err(Error::Io { .. })),
+        "{file_system}: a note larger than the room left answered {big:?}"
+    );
+    let snapshot = board.snapshot().expect("snapshot");
+    assert_eq!(
+        (snapshot.notes.len(), snapshot.strays),
+        (1, Vec::<String>::new()),
+        "{file_system}: a note that did not fit left part of itself on the board"
+    );
     drop(mounted);
 }
 
