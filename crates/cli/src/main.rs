@@ -40,7 +40,7 @@ Examples:
   wb --workspace boards board add Garden
   wb --workspace boards --board garden section add Beds
   wb --workspace boards --board garden section add Spring --parent Beds
-  echo \"Tomatoes, basil and beans.\" | wb --workspace boards --board garden note add --title \"Plant list\" --section Beds --tag plan
+  echo \"Beans.\" | wb --workspace boards --board garden note add --title \"Plant list\" --tag plan
   wb --workspace boards --board garden note list --tag plan
   wb --workspace boards --board garden note edit n3 --append --body \"Add peas.\"";
 

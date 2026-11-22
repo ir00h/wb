@@ -39,8 +39,8 @@ pub enum NoteCommand {
     },
     #[command(
         about = "Add a note. The body comes from --body, --file or stdin",
-        long_about = "Add a note. The body comes from --body, --file (`-` for stdin) or stdin when it is not a terminal. Without --title, a body that starts with a `# Heading` line gives the title. A note without --section goes into the board's default section.\n\nRefused: a section the config lacks.\n\nPrints the new id and file. JSON: {id, path, board, section, stack, order, tags}",
-        after_long_help = "Examples:\n  wb --workspace boards --board garden note add --title \"Plant list\" --section Beds --tag plan --source \"garden diary\" --body \"Tomatoes, basil and beans.\"\n  cat plan.md | wb --workspace boards --board garden note add --section \"Beds / Spring\" --tag plan\n  wb --workspace boards --board garden note add --title \"Seed order\" --section \"Seed trays\""
+        long_about = "Add a note. The body comes from --body, --file (`-` for stdin) or stdin when it is not a terminal. Without --title, a body that starts with a `# Heading` line gives the title. A note without --section goes into the board's default section.\n\nRefused: a section the config lacks, a tag that is not well formed (lowercase words joined by -, with / for a namespace, like plan or ticket/abc-12).\n\nPrints the new id and file. JSON: {id, path, board, section, stack, order, tags}",
+        after_long_help = "Examples:\n  wb --workspace boards --board garden note add --title \"Plant list\" --body \"Beans and peas.\"\n  wb --workspace boards --board garden note add --title \"Seed order\" --section Beds --tag plan\n  cat plan.md | wb --workspace boards --board garden note add --source \"garden diary\""
     )]
     Add {
         #[arg(
