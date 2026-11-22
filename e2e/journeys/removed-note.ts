@@ -67,6 +67,7 @@ export const removedNote: Journey = {
     const text = await readFile(join(board, restored ?? ""), "utf8");
     assert.match(text, /^section: Beds$/m, `the new note is not in the same section:\n${text}`);
     assert.match(text, /^# Plant list$/m, `the new note lost its title:\n${text}`);
+    assert.match(text, /^tags: \[plan\]$/m, `the new note lost its tags:\n${text}`);
     await app.waitFor(() => document.querySelector("[data-removed]") === null, {
       timeout: WAIT_MS,
     });
