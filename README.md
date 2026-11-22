@@ -23,7 +23,7 @@ You need Rust (the version in `rust-toolchain.toml` is installed on first use), 
 ```sh
 pnpm install
 cargo build --workspace
-pnpm tauri dev -- -- --workspace <folder>
+WHITEBOARD_WORKSPACE=<folder> pnpm tauri dev
 ```
 
 The app shows one board of a workspace folder. Name the folder with `--workspace <folder>` or `WHITEBOARD_WORKSPACE`, and the board with `--board <board>` or `WB_BOARD`; without a board it opens the first one. It watches the board's folder and shows changes other programs make.
