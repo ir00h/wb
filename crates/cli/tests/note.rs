@@ -738,22 +738,24 @@ fn note_edit_leaves_the_board_file_alone() {
 fn twenty_processes_appending_to_one_note_all_land() {
     let garden = Garden::new("note-writers");
     let id = garden.add_note(&["--title", "Plant list"]);
-    let children: Vec<_> = (0..20)
+    let calls: Vec<Vec<String>> = (0..20)
         .map(|number| {
-            let mut command = garden.scratch.command();
-            command
-                .arg("--workspace")
-                .arg(garden.scratch.workspace())
-                .args([
-                    "--board", "garden", "note", "edit", &id, "--append", "--body",
-                ])
-                .arg(format!("line {number}"));
-            std::thread::spawn(move || common::run(command, None))
+            [
+                "--board", "garden", "note", "edit", &id, "--append", "--body",
+            ]
+            .map(String::from)
+            .into_iter()
+            .chain([format!("line {number}")])
+            .collect()
         })
         .collect();
-    for child in children {
-        child.join().expect("a writer").ok();
-    }
+    let refused: Vec<String> = garden
+        .scratch
+        .start_together(&calls)
+        .into_iter()
+        .filter(|run| run.code != 0)
+        .map(|run| run.stderr)
+        .collect();
     let body = text_of(
         &garden.wb(&["note", "show", &id, "--json"]).ok().json(),
         "body",
@@ -762,8 +764,9 @@ fn twenty_processes_appending_to_one_note_all_land() {
         .lines()
         .filter(|line| line.starts_with("line "))
         .count();
-    assert_eq!(
-        lines, 20,
-        "{lines} of 20 lines appended by processes are in the note:\n{body}"
+    assert!(
+        refused.is_empty() && lines == 20,
+        "{lines} of 20 lines appended by processes are in the note, {} writers failed: {refused:?}",
+        refused.len()
     );
 }

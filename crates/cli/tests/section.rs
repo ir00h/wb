@@ -273,29 +273,29 @@ Seed trays  0      sTRAYS0        -       -
 fn twenty_processes_adding_sections_all_land() {
     let scratch = Scratch::new("section-writers");
     scratch.wb(&["board", "add", "garden"]).ok();
-    let children: Vec<_> = (0..20)
+    let calls: Vec<Vec<String>> = (0..20)
         .map(|number| {
-            let mut command = scratch.command();
-            command.arg("--workspace").arg(scratch.workspace()).args([
-                "--board",
-                "garden",
-                "section",
-                "add",
-                &format!("Bed {number}"),
-            ]);
-            std::thread::spawn(move || common::run(command, None))
+            ["--board", "garden", "section", "add"]
+                .map(String::from)
+                .into_iter()
+                .chain([format!("Bed {number}")])
+                .collect()
         })
         .collect();
-    for child in children {
-        child.join().expect("a writer").ok();
-    }
+    let refused: Vec<String> = scratch
+        .start_together(&calls)
+        .into_iter()
+        .filter(|run| run.code != 0)
+        .map(|run| run.stderr)
+        .collect();
     let rows = scratch
         .wb(&["--board", "garden", "section", "list", "--json"])
         .ok()
         .json();
     let count = rows.as_array().map_or(0, Vec::len);
-    assert_eq!(
-        count, 20,
-        "{count} of 20 sections added by processes are in the config"
+    assert!(
+        refused.is_empty() && count == 20,
+        "{count} of 20 sections added by processes are in the config, {} writers failed: {refused:?}",
+        refused.len()
     );
 }

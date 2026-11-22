@@ -7,12 +7,17 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
 pub const WORKSPACE_ENV: &str = "WHITEBOARD_WORKSPACE";
 pub const BOARD_ENV: &str = "WB_BOARD";
 const TMP: &str = "<tmp>";
+const SHELL: &str = "/bin/sh";
+const WAIT_FOR_THE_START: &str = r#": > "$1"; while [ ! -e "$2" ]; do :; done; shift 2; exec "$@""#;
+const READY_DEADLINE: Duration = Duration::from_secs(20);
+const READY_POLL: Duration = Duration::from_millis(1);
 
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
 
@@ -84,6 +89,43 @@ impl Scratch {
             .env_remove(WORKSPACE_ENV)
             .env_remove(BOARD_ENV);
         command
+    }
+
+    pub fn start_together(&self, calls: &[Vec<String>]) -> Vec<Run> {
+        let gate = self.path.join("start-together");
+        fs::create_dir_all(&gate).expect("the start folder");
+        let go = gate.join("go");
+        let children: Vec<_> = calls
+            .iter()
+            .enumerate()
+            .map(|(number, args)| {
+                let mut command = self.command();
+                command.arg("--workspace").arg(self.workspace()).args(args);
+                let mut waiting = Command::new(SHELL);
+                waiting
+                    .current_dir(&self.path)
+                    .env_clear()
+                    .args(["-c", WAIT_FOR_THE_START, "wait"])
+                    .arg(gate.join(format!("ready-{number}")))
+                    .arg(&go)
+                    .arg(command.get_program())
+                    .args(command.get_args());
+                std::thread::spawn(move || run(waiting, None))
+            })
+            .collect();
+        let started = Instant::now();
+        while fs::read_dir(&gate).expect("the start folder").count() < calls.len() {
+            assert!(
+                started.elapsed() < READY_DEADLINE,
+                "not every writer got ready to start"
+            );
+            std::thread::sleep(READY_POLL);
+        }
+        fs::write(&go, "").expect("the start signal");
+        children
+            .into_iter()
+            .map(|child| child.join().expect("a writer"))
+            .collect()
     }
 
     pub fn normalise(&self, text: &str, ids: &[(&str, &str)]) -> String {
