@@ -10,12 +10,14 @@ use std::time::{Duration, Instant};
 
 use wb_core::{Board, Volume, Workspace};
 use wb_model::{
-    BodyChange, Change, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, parse,
+    BodyChange, Change, Error, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, parse,
 };
 
 pub const ROLE: &str = "WB_TEST_ROLE";
 const VOLUME: &str = "WB_TEST_VOLUME";
 const PATIENCE: Duration = Duration::from_secs(30);
+const A_BLANK_CONFIG_IS_WAITED_OUT_FOR: Duration = Duration::from_millis(125);
+const TRIALS_WITH_A_LATE_EDITOR: usize = 20;
 
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
 
@@ -109,6 +111,33 @@ pub fn add_note(board: &Board, title: &str, body: &str) -> NoteCard {
         Outcome::Applied { note } => note,
         other => panic!("adding a note answered {other:?}"),
     }
+}
+
+pub struct Answered {
+    pub answer: Result<Outcome, Error>,
+    pub busy: usize,
+}
+
+pub fn apply_until_it_is_not_busy(board: &Board, op: &Op) -> Answered {
+    let mut busy = 0;
+    loop {
+        match board.apply(op.clone()) {
+            Err(Error::Busy { .. }) => busy += 1,
+            answer => return Answered { answer, busy },
+        }
+    }
+}
+
+pub fn with_an_editor_that_saves_in_time<T>(mut trial: impl FnMut() -> (Duration, T)) -> T {
+    for _ in 0..TRIALS_WITH_A_LATE_EDITOR {
+        let (took, seen) = trial();
+        if took < A_BLANK_CONFIG_IS_WAITED_OUT_FOR {
+            return seen;
+        }
+    }
+    panic!(
+        "in {TRIALS_WITH_A_LATE_EDITOR} trials the editor never saved within {A_BLANK_CONFIG_IS_WAITED_OUT_FOR:?}, so no trial showed anything"
+    );
 }
 
 pub fn change(base: Option<&str>, to: &str) -> Change<String> {

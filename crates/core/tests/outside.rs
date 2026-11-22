@@ -3,36 +3,40 @@ mod common;
 use std::fs::{self, File};
 use std::io::Write;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use common::{Scratch, add_note, add_section};
+use common::{Scratch, add_note, add_section, with_an_editor_that_saves_in_time};
 use wb_model::CONFIG_FILE;
 
 const SAVE_TAKES: Duration = Duration::from_millis(40);
 const SAVED_BY_AN_EDITOR: &str = "{\n  \"version\": 1,\n  \"theme\": \"meadow\",\n  \"sections\": [\n    {\n      \"id\": \"s000001\",\n      \"name\": \"Beds\"\n    }\n  ],\n  \"defaultSection\": \"s000001\"\n}\n";
 
-fn start_a_save_in_place(config: &std::path::Path) -> thread::JoinHandle<()> {
+fn start_a_save_in_place(config: &std::path::Path) -> thread::JoinHandle<Duration> {
     let mut emptied = File::create(config).expect("config emptied by the editor");
+    let emptied_at = Instant::now();
     thread::spawn(move || {
         thread::sleep(SAVE_TAKES);
         emptied
             .write_all(SAVED_BY_AN_EDITOR.as_bytes())
             .expect("config written by the editor");
+        emptied_at.elapsed()
     })
 }
 
 #[test]
 fn a_section_added_while_an_editor_saves_the_config_in_place_wipes_nothing() {
-    let scratch = Scratch::new("config-in-place");
-    let board = scratch.garden();
-    let config = scratch.path().join("garden").join(CONFIG_FILE);
-    fs::write(&config, SAVED_BY_AN_EDITOR).expect("config");
+    let now = with_an_editor_that_saves_in_time(|| {
+        let scratch = Scratch::new("config-in-place");
+        let board = scratch.garden();
+        let config = scratch.path().join("garden").join(CONFIG_FILE);
+        fs::write(&config, SAVED_BY_AN_EDITOR).expect("config");
 
-    let editor = start_a_save_in_place(&config);
-    board.apply(add_section("Paths")).expect("section");
-    editor.join().expect("editor");
+        let editor = start_a_save_in_place(&config);
+        board.apply(add_section("Paths")).expect("section");
+        let took = editor.join().expect("editor");
+        (took, fs::read_to_string(&config).expect("config"))
+    });
 
-    let now = fs::read_to_string(&config).expect("config");
     assert!(
         now.contains("\"theme\": \"meadow\"")
             && now.contains("\"name\": \"Beds\"")
@@ -43,14 +47,16 @@ fn a_section_added_while_an_editor_saves_the_config_in_place_wipes_nothing() {
 
 #[test]
 fn a_note_added_while_an_editor_saves_the_config_in_place_lands_in_the_default_section() {
-    let scratch = Scratch::new("config-in-place-note");
-    let board = scratch.garden();
-    let config = scratch.path().join("garden").join(CONFIG_FILE);
-    fs::write(&config, SAVED_BY_AN_EDITOR).expect("config");
+    let note = with_an_editor_that_saves_in_time(|| {
+        let scratch = Scratch::new("config-in-place-note");
+        let board = scratch.garden();
+        let config = scratch.path().join("garden").join(CONFIG_FILE);
+        fs::write(&config, SAVED_BY_AN_EDITOR).expect("config");
 
-    let editor = start_a_save_in_place(&config);
-    let note = add_note(&board, "Plant list", "Tomatoes");
-    editor.join().expect("editor");
+        let editor = start_a_save_in_place(&config);
+        let note = add_note(&board, "Plant list", "Tomatoes");
+        (editor.join().expect("editor"), note)
+    });
 
     assert_eq!(
         note.section.as_ref().map(ToString::to_string),

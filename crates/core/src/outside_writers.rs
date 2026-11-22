@@ -1,8 +1,11 @@
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use wb_model::{
     BodyChange, CONFIG_FILE, Change, Error, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome,
@@ -18,6 +21,10 @@ const KILLED_WRITER: &str = "WB_TEST_KILLED_WRITER";
 const KILLED_WRITER_NOTE: &str = "WB_TEST_KILLED_WRITER_NOTE";
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
 const AT_ONCE: Duration = Duration::from_millis(50);
+const SAVE_TAKES: Duration = Duration::from_millis(40);
+const A_BLANK_CONFIG_IS_WAITED_OUT_FOR: Duration = Duration::from_millis(125);
+const TRIALS_WITH_A_LATE_EDITOR: usize = 20;
+const SAVED_BY_THE_EDITOR: &str = "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n";
 
 fn volume_under_test() -> Option<Volume> {
     match std::env::var(VOLUME).as_deref() {
@@ -567,32 +574,53 @@ fn an_edit_that_cannot_land_answers_an_error_and_writes_nothing() {
     );
 }
 
+type FinishTheSave = Box<dyn FnOnce() + Send>;
+
+fn a_section_added_while_an_editor_saves_the_config(
+    start_the_save: fn(&Path) -> FinishTheSave,
+) -> (Result<Outcome, Error>, String) {
+    for _ in 0..TRIALS_WITH_A_LATE_EDITOR {
+        let garden = Garden::new("editor-at-the-last-look");
+        let config = garden.folder().join(CONFIG_FILE);
+        fs::write(&config, SAVED_BY_THE_EDITOR).expect("config");
+        let (hand_over, take_over) = mpsc::channel::<(FinishTheSave, Instant)>();
+        let editor = thread::spawn(move || {
+            let (finish, blank_since) = take_over.recv().expect("the editor's save");
+            thread::sleep(SAVE_TAKES);
+            finish();
+            blank_since.elapsed()
+        });
+
+        when_the_core_can_still_see_it(move |config| {
+            let finish = start_the_save(config);
+            hand_over.send((finish, Instant::now())).expect("hand over");
+        });
+        let answer = garden.board.apply(Op::AddSection {
+            name: "Beds".to_owned(),
+            parent: None,
+            note: String::new(),
+            hue: None,
+        });
+        if editor.join().expect("editor") < A_BLANK_CONFIG_IS_WAITED_OUT_FOR {
+            return (answer, fs::read_to_string(&config).expect("config"));
+        }
+    }
+    panic!(
+        "in {TRIALS_WITH_A_LATE_EDITOR} trials the editor never saved within {A_BLANK_CONFIG_IS_WAITED_OUT_FOR:?}, so no trial showed anything"
+    );
+}
+
 #[test]
 fn a_config_emptied_at_the_last_moment_is_waited_out_and_never_taken_as_empty() {
-    let garden = Garden::new("blank-at-the-last-look");
-    let config = garden.folder().join(CONFIG_FILE);
-    let saved = "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n";
-    fs::write(&config, saved).expect("config");
-    let (hand_over, take_over) = std::sync::mpsc::channel::<fs::File>();
-    let editor = std::thread::spawn(move || {
-        let mut emptied = take_over.recv().expect("the editor's open file");
-        std::thread::sleep(Duration::from_millis(40));
-        std::io::Write::write_all(&mut emptied, saved.as_bytes()).expect("editor save");
+    let (answer, now) = a_section_added_while_an_editor_saves_the_config(|config| {
+        let mut emptied = fs::File::create(config).expect("the editor empties the config");
+        Box::new(move || {
+            emptied
+                .write_all(SAVED_BY_THE_EDITOR.as_bytes())
+                .expect("editor save");
+        })
     });
 
-    when_the_core_can_still_see_it(move |config| {
-        let emptied = fs::File::create(config).expect("the editor empties the config");
-        hand_over.send(emptied).expect("hand over");
-    });
-    let answer = garden.board.apply(Op::AddSection {
-        name: "Beds".to_owned(),
-        parent: None,
-        note: String::new(),
-        hue: None,
-    });
-    editor.join().expect("editor");
-
-    let now = fs::read_to_string(&config).expect("config");
     assert!(
         now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
         "the config the editor was saving was replaced by an empty one with the section:\n{now}"
@@ -605,31 +633,12 @@ fn a_config_emptied_at_the_last_moment_is_waited_out_and_never_taken_as_empty() 
 
 #[test]
 fn a_config_holding_only_white_space_at_the_last_moment_is_waited_out_and_never_taken_as_empty() {
-    let garden = Garden::new("white-space-at-the-last-look");
-    let config = garden.folder().join(CONFIG_FILE);
-    let saved = "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n";
-    fs::write(&config, saved).expect("config");
-    let saving = config.clone();
-    let (start, started) = std::sync::mpsc::channel::<()>();
-    let editor = std::thread::spawn(move || {
-        started.recv().expect("start");
-        std::thread::sleep(Duration::from_millis(40));
-        fs::write(saving, saved).expect("editor save");
-    });
-
-    when_the_core_can_still_see_it(move |config| {
+    let (answer, now) = a_section_added_while_an_editor_saves_the_config(|config| {
         fs::write(config, "\n").expect("the editor leaves one empty line");
-        start.send(()).expect("start");
+        let saving = config.to_path_buf();
+        Box::new(move || fs::write(saving, SAVED_BY_THE_EDITOR).expect("editor save"))
     });
-    let answer = garden.board.apply(Op::AddSection {
-        name: "Beds".to_owned(),
-        parent: None,
-        note: String::new(),
-        hue: None,
-    });
-    editor.join().expect("editor");
 
-    let now = fs::read_to_string(&config).expect("config");
     assert!(
         now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
         "the config the editor was saving was replaced by an empty one with the section, answered {answer:?}:\n{now}"

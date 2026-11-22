@@ -8,8 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use common::{
-    ROLE, Scratch, add_note, add_section, append, every_test_passes_again_without_an_exchange,
-    files_holding, open_board, open_workspace, set_body, set_title, setting, spawn_role, wait_for,
+    Answered, ROLE, Scratch, add_note, add_section, append, apply_until_it_is_not_busy,
+    every_test_passes_again_without_an_exchange, files_holding, open_board, open_workspace,
+    set_body, set_title, setting, spawn_role, wait_for,
 };
 use wb_core::TRASH_FOLDER;
 use wb_core::lock::{BoardLocks, LockError, LockKey};
@@ -72,7 +73,9 @@ fn another_process_plays_its_role() {
     let op = writer_op(&role, &setting(NOTE), number.parse().expect("number"));
     File::create(ready_marker(&workspace, &number)).expect("marker");
     wait_for("the start signal", || start_signal(&workspace).exists());
-    board.apply(op).expect("applied");
+    apply_until_it_is_not_busy(&board, &op)
+        .answer
+        .expect("applied");
 }
 
 fn write_from_threads(workspace: &Path, role: &str, note: &str) {
@@ -84,7 +87,9 @@ fn write_from_threads(workspace: &Path, role: &str, note: &str) {
             thread::spawn(move || {
                 let board = open_board(&workspace, GARDEN);
                 start.wait();
-                board.apply(op).expect("applied");
+                apply_until_it_is_not_busy(&board, &op)
+                    .answer
+                    .expect("applied");
             })
         })
         .collect();
@@ -121,12 +126,10 @@ fn write_from_processes(workspace: &Path, role: &str, note: &str) {
 
 fn assert_every_line_is_kept(workspace: &Path, note: &NoteId, writers: &str) {
     let body = open_board(workspace, GARDEN).note(note).expect("note").body;
-    let kept = (0..WRITERS)
-        .filter(|number| body.lines().any(|written| written == line(*number)))
-        .count();
+    let kept = lines_kept_once(&body, 0..WRITERS);
     assert_eq!(
         kept, WRITERS,
-        "{kept} of {WRITERS} lines appended by {writers} are in the note:\n{body}"
+        "{kept} of {WRITERS} lines appended by {writers} are in the note exactly once:\n{body}"
     );
 }
 
@@ -137,12 +140,14 @@ fn assert_every_section_is_kept(workspace: &Path, writers: &str) {
             snapshot
                 .sections
                 .iter()
-                .any(|section| section.name == section_name(*number))
+                .filter(|section| section.name == section_name(*number))
+                .count()
+                == 1
         })
         .count();
     assert_eq!(
         kept, WRITERS,
-        "{kept} of {WRITERS} sections added by {writers} are in the config"
+        "{kept} of {WRITERS} sections added by {writers} are in the config exactly once"
     );
 }
 
@@ -309,7 +314,7 @@ struct Stalled {
     holder: thread::JoinHandle<Instant>,
 }
 
-fn stall_inside_a_config_change(folder: &Path) -> Stalled {
+fn stall_inside_a_config_change(folder: &Path, stall: impl FnOnce() + Send + 'static) -> Stalled {
     let (entered, has_entered) = mpsc::channel();
     let folder = folder.to_path_buf();
     let holder = thread::spawn(move || {
@@ -320,7 +325,7 @@ fn stall_inside_a_config_change(folder: &Path) -> Stalled {
         let text = fs::read_to_string(&path).unwrap_or_default();
         let mut config = BoardConfig::parse(&text).expect("config");
         entered.send(()).expect("signal");
-        thread::sleep(STALL);
+        stall();
         let id = SectionId::parse("sholder").expect("section id");
         config
             .add_section(&id, "From the holder", None, "", None)
@@ -348,7 +353,8 @@ fn a_writer_waits_for_a_stalled_holder_and_both_changes_are_kept() {
     let scratch = Scratch::new("stalled-wait");
     scratch.garden();
     let started = Instant::now();
-    let stalled = stall_inside_a_config_change(&scratch.path().join(GARDEN));
+    let stalled =
+        stall_inside_a_config_change(&scratch.path().join(GARDEN), || thread::sleep(STALL));
 
     thread::sleep(ARRIVAL);
     let writer = open_workspace(scratch.path())
@@ -376,14 +382,17 @@ fn a_writer_waits_for_a_stalled_holder_and_both_changes_are_kept() {
 fn a_writer_with_a_short_deadline_gives_up_and_changes_nothing() {
     let scratch = Scratch::new("stalled-busy");
     scratch.garden();
-    let stalled = stall_inside_a_config_change(&scratch.path().join(GARDEN));
+    let (release, released) = mpsc::channel::<()>();
+    let stalled = stall_inside_a_config_change(&scratch.path().join(GARDEN), move || {
+        released.recv().expect("release");
+    });
 
-    thread::sleep(ARRIVAL);
     let writer = open_workspace(scratch.path())
         .with_lock_deadline(SHORT_DEADLINE)
         .board(&GARDEN.parse().expect("board id"))
         .expect("board");
     let answer = writer.apply(add_section("From the writer"));
+    release.send(()).expect("release");
     stalled.holder.join().expect("holder");
 
     assert!(
@@ -413,18 +422,17 @@ fn leave_a_dead_holder(workspace: &Path, trial: usize) {
 #[test]
 fn the_lock_of_a_killed_holder_is_free_at_once() {
     let scratch = Scratch::new("killed-holder");
-    let board = scratch.garden();
+    scratch.garden();
     leave_a_dead_holder(scratch.path(), 0);
 
-    let started = Instant::now();
-    board
-        .apply(add_section("After the crash"))
-        .expect("section");
-    let waited = started.elapsed();
+    let writer = open_workspace(scratch.path())
+        .with_lock_deadline(Duration::ZERO)
+        .board(&GARDEN.parse().expect("board id"))
+        .expect("board");
+    let answer = writer.apply(add_section("After the crash"));
     assert!(
-        waited < Duration::from_secs(1),
-        "the next writer waited {:.2} s for the lock of a killed holder",
-        waited.as_secs_f64()
+        matches!(answer, Ok(Outcome::SectionAdded { .. })),
+        "a writer that does not wait found the lock of a killed holder taken: {answer:?}"
     );
 }
 
@@ -496,7 +504,7 @@ fn arrive_one_after_another(
     workspace: &Path,
     writers: usize,
     op_of: impl Fn(usize) -> Op,
-) -> Vec<Result<Outcome, Error>> {
+) -> Vec<Answered> {
     let arriving: Vec<_> = (0..writers)
         .map(|number| {
             let (workspace, op) = (workspace.to_path_buf(), op_of(number));
@@ -504,7 +512,7 @@ fn arrive_one_after_another(
             thread::spawn(move || {
                 let board = open_board(&workspace, GARDEN);
                 thread::sleep(wait);
-                board.apply(op)
+                apply_until_it_is_not_busy(&board, &op)
             })
         })
         .collect();
@@ -514,9 +522,26 @@ fn arrive_one_after_another(
         .collect()
 }
 
-fn lines_kept(body: &str, numbers: impl Iterator<Item = usize>) -> usize {
+fn refused(answers: &[Answered]) -> Vec<&Result<Outcome, Error>> {
+    answers
+        .iter()
+        .map(|answered| &answered.answer)
+        .filter(|answer| answer.is_err())
+        .collect()
+}
+
+fn busy_answers(answers: &[Answered]) -> usize {
+    answers.iter().map(|answered| answered.busy).sum()
+}
+
+fn lines_kept_once(body: &str, numbers: impl Iterator<Item = usize>) -> usize {
     numbers
-        .filter(|number| body.lines().any(|written| written == line(*number)))
+        .filter(|number| {
+            body.lines()
+                .filter(|written| *written == line(*number))
+                .count()
+                == 1
+        })
         .count()
 }
 
@@ -524,19 +549,24 @@ fn lines_kept(body: &str, numbers: impl Iterator<Item = usize>) -> usize {
 fn forty_writers_arriving_one_after_another_all_land() {
     let scratch = Scratch::new("append-staggered");
     let note = add_note(&scratch.garden(), "Harvest log", "").id;
+    let folder = scratch.path().join(GARDEN);
     let answers = arrive_one_after_another(scratch.path(), STAGGERED_WRITERS, |number| {
         append(&note, &line(number))
     });
-    let refused: Vec<_> = answers.iter().filter(|answer| answer.is_err()).collect();
+    let refused = refused(&answers);
     assert!(refused.is_empty(), "appends were refused: {refused:?}");
+    let holding = files_holding(&folder, &note);
     let body = open_board(scratch.path(), GARDEN)
         .note(&note)
         .expect("note")
         .body;
-    let kept = lines_kept(&body, 0..STAGGERED_WRITERS);
+    let kept = lines_kept_once(&body, 0..STAGGERED_WRITERS);
     assert_eq!(
-        kept, STAGGERED_WRITERS,
-        "{kept} of {STAGGERED_WRITERS} lines appended by writers arriving one after another are in the note"
+        (kept, holding.len()),
+        (STAGGERED_WRITERS, 1),
+        "{kept} of {STAGGERED_WRITERS} lines appended by writers arriving one after another are in the note exactly once, after {} busy answers, and {} files hold its id: {holding:?}",
+        busy_answers(&answers),
+        holding.len()
     );
 }
 
@@ -552,7 +582,7 @@ fn appends_racing_title_changes_all_land_in_the_one_file_of_the_note() {
             set_title(&note, None, &format!("Harvest log {number}"))
         }
     });
-    let refused: Vec<_> = answers.iter().filter(|answer| answer.is_err()).collect();
+    let refused = refused(&answers);
     assert!(
         refused.is_empty(),
         "writers were refused while the note was renamed: {refused:?}"
@@ -563,12 +593,13 @@ fn appends_racing_title_changes_all_land_in_the_one_file_of_the_note() {
         .as_ref()
         .map(|note| note.body.clone())
         .unwrap_or_default();
-    let kept = lines_kept(&body, (0..WRITERS).step_by(2));
+    let kept = lines_kept_once(&body, (0..WRITERS).step_by(2));
     assert_eq!(
         (kept, holding.len()),
         (WRITERS / 2, 1),
-        "{kept} of {} lines appended during title changes are in the note, and {} files hold its id: {holding:?}",
+        "{kept} of {} lines appended during title changes are in the note exactly once, after {} busy answers, and {} files hold its id: {holding:?}",
         WRITERS / 2,
+        busy_answers(&answers),
         holding.len()
     );
     assert_eq!(holding, [wb_model::file_name(&now.expect("note"))]);
