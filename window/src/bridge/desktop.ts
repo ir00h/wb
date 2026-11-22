@@ -1,6 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen as listenToShell } from "@tauri-apps/api/event";
-import type { CallFailure } from "../bindings/CallFailure";
 import type { Calls, Events } from "../bindings/Calls";
 import { ERROR_TYPES } from "../bindings/Calls";
 import type { CoreError } from "../bindings/CoreError";
@@ -11,9 +10,14 @@ export type CallName = keyof Calls;
 
 export type EventName = keyof Events;
 
+export type Failure = {
+  readonly kind: CoreError["type"];
+  readonly message: string;
+};
+
 export type Answer<K extends CallName> =
   | { readonly kind: "replied"; readonly reply: Calls[K]["reply"] }
-  | { readonly kind: "failed"; readonly failure: CallFailure };
+  | { readonly kind: "failed"; readonly failure: Failure };
 
 export function runsInDesktopShell(): boolean {
   return isTauri();
@@ -27,20 +31,19 @@ function isErrorType(value: unknown): value is CoreError["type"] {
   return ERROR_TYPES.some((type) => type === value);
 }
 
-function hasKnownErrorType(value: unknown): value is CoreError {
-  return isRecord(value) && isErrorType(value.type);
-}
-
-export function parseFailure(call: CallName, rejection: unknown): CallFailure {
+export function parseFailure(call: CallName, rejection: unknown): Failure {
   if (
     isRecord(rejection) &&
     typeof rejection.message === "string" &&
-    hasKnownErrorType(rejection.error)
+    isRecord(rejection.error) &&
+    isErrorType(rejection.error.type)
   ) {
-    return { error: rejection.error, message: rejection.message };
+    return { kind: rejection.error.type, message: rejection.message };
   }
-  const message = `the app answered ${call} in a form the window does not know: ${String(rejection)}`;
-  return { error: { type: "badCall", call, message }, message };
+  return {
+    kind: "badCall",
+    message: `the app answered ${call} in a form the window does not know: ${String(rejection)}`,
+  };
 }
 
 export async function call<K extends CallName>(
