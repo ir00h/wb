@@ -248,6 +248,37 @@ fn a_note_in_a_file_named_for_another_id_is_found_by_the_id_inside_it() {
 }
 
 #[test]
+fn a_title_change_never_renames_over_a_file_that_holds_the_new_name() {
+    let scratch = Scratch::new("title-collides");
+    let board = scratch.garden();
+    let folder = scratch.path().join("garden");
+    let note = add_note(&board, "Carrots", "orange");
+    let squatter = folder.join(format!("beets-{}.md", note.id));
+    fs::write(&squatter, "hand written, no front matter\n").expect("hand-written file");
+
+    let answer = board.apply(common::set_title(&note.id, Some("Carrots"), "Beets"));
+
+    assert_eq!(
+        fs::read_to_string(&squatter).expect("hand-written file"),
+        "hand written, no front matter\n",
+        "the title change renamed the note over a file that was there"
+    );
+    let kept = board.note_file(&note.id).expect("note");
+    assert_eq!(
+        (kept.name, kept.note.title, kept.note.body),
+        (
+            format!("carrots-{}.md", note.id),
+            "Beets".to_owned(),
+            "orange".to_owned()
+        )
+    );
+    assert!(
+        matches!(&answer, Ok(wb_model::Outcome::Applied { note }) if note.title == "Beets"),
+        "{answer:?}"
+    );
+}
+
+#[test]
 fn every_outside_writer_is_also_seen_on_a_volume_without_an_exchange() {
     common::every_test_passes_again_without_an_exchange();
 }

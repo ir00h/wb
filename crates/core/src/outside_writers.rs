@@ -450,6 +450,94 @@ fn a_file_that_changed_before_the_exchange_is_never_exchanged() {
 }
 
 #[test]
+fn an_outside_edit_of_the_same_length_is_a_conflict() {
+    let garden = Garden::new("same-length");
+    let note = garden.add_note("Tomato plan", "Six plants.");
+    let file = garden.file_of(&note);
+    let outside = fs::read_to_string(&file)
+        .expect("note file")
+        .replace("Six plants.", "Ten plants.");
+
+    let written_outside = outside.clone();
+    when_the_core_can_still_see_it(move |file| {
+        fs::write(file, written_outside).expect("outside edit");
+    });
+    let answer = garden
+        .board
+        .apply(set_body(&note.id, "Six plants.", "Six plants and basil."));
+
+    assert_eq!(
+        fs::read_to_string(&file).expect("note file"),
+        outside,
+        "the edit replaced an outside text of the same length"
+    );
+    assert!(
+        matches!(&answer, Ok(Outcome::Conflict { current }) if current.body == "Ten plants."),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn a_config_emptied_at_the_last_moment_is_waited_out_and_never_taken_as_empty() {
+    let garden = Garden::new("blank-at-the-last-look");
+    let config = garden.folder().join(CONFIG_FILE);
+    let saved = "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n";
+    fs::write(&config, saved).expect("config");
+    let (hand_over, take_over) = std::sync::mpsc::channel::<fs::File>();
+    let editor = std::thread::spawn(move || {
+        let mut emptied = take_over.recv().expect("the editor's open file");
+        std::thread::sleep(Duration::from_millis(40));
+        std::io::Write::write_all(&mut emptied, saved.as_bytes()).expect("editor save");
+    });
+
+    when_the_core_can_still_see_it(move |config| {
+        let emptied = fs::File::create(config).expect("the editor empties the config");
+        hand_over.send(emptied).expect("hand over");
+    });
+    let answer = garden.board.apply(Op::AddSection {
+        name: "Beds".to_owned(),
+        parent: None,
+        note: String::new(),
+        hue: None,
+    });
+    editor.join().expect("editor");
+
+    let now = fs::read_to_string(&config).expect("config");
+    assert!(
+        now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
+        "the config the editor was saving was replaced by an empty one with the section:\n{now}"
+    );
+    assert!(
+        matches!(answer, Ok(Outcome::SectionAdded { .. })),
+        "{answer:?}"
+    );
+}
+
+#[test]
+fn a_config_another_program_creates_at_the_last_moment_keeps_its_keys_and_the_section() {
+    let garden = Garden::new("created-at-the-last-moment");
+    let config = garden.folder().join(CONFIG_FILE);
+    assert!(!config.exists());
+
+    at_the_next(Moment::BeforeTheCreation, |config| {
+        fs::write(config, "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n")
+            .expect("outside save");
+    });
+    let answer = garden.board.apply(Op::AddSection {
+        name: "Beds".to_owned(),
+        parent: None,
+        note: String::new(),
+        hue: None,
+    });
+
+    let now = fs::read_to_string(&config).expect("config");
+    assert!(
+        now.contains("\"theme\": \"meadow\"") && now.contains("\"name\": \"Beds\""),
+        "the section or the config another program created is gone, answered {answer:?}:\n{now}"
+    );
+}
+
+#[test]
 fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
     if std::env::var_os(VOLUME).is_some() {
         return;

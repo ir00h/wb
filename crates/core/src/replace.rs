@@ -72,6 +72,8 @@ pub fn replace_if_unchanged(
 pub fn create_new(held: &Held, target: Target, new: &[u8]) -> io::Result<Created> {
     let temporary = held.temporary_file(&target.key())?;
     let path = target.path(held.board());
+    #[cfg(test)]
+    hook::run(hook::Moment::BeforeTheCreation, &path);
     let created = match held.volume().creation {
         Creation::RenameWithoutReplacing => write_temporary(&temporary, new, None)
             .and_then(|()| platform::rename_without_replacing(&temporary, &path)),
@@ -225,6 +227,7 @@ pub mod hook {
     pub enum Moment {
         BeforeTheLastLook,
         AfterTheLastLook,
+        BeforeTheCreation,
     }
 
     thread_local! {
