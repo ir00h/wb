@@ -13,6 +13,7 @@ pub struct NewNote {
     pub title: Option<String>,
     pub section: Option<String>,
     pub tags: Vec<String>,
+    pub source: String,
     pub body: Option<String>,
 }
 
@@ -76,7 +77,7 @@ pub fn add(cx: &Context, request: NewNote) -> Result<Added> {
         body,
         section: draft_section(&board, request.section.as_deref())?,
         tags: request.tags,
-        source: String::new(),
+        source: request.source,
     };
     let Outcome::Applied { note } = board.board.apply(Op::AddNote { draft })? else {
         fail!("the note was written but cannot be read back")

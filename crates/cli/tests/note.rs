@@ -192,6 +192,39 @@ fn note_add_reads_the_body_from_stdin_or_a_file() {
 }
 
 #[test]
+fn note_add_keeps_where_the_note_came_from() {
+    let garden = Garden::new("note-add-source");
+    let id = garden.add_note(&[
+        "--title",
+        "Watering plan",
+        "--section",
+        "Beds / Spring",
+        "--tag",
+        "plan",
+        "--source",
+        "garden diary",
+        "--body",
+        "Water at dawn.",
+    ]);
+    assert_eq!(
+        garden
+            .scratch
+            .read(&format!("garden/watering-plan-{id}.md")),
+        format!(
+            "---\nid: {id}\nsection: Beds / Spring\ntags: [plan]\nsource: garden diary\n---\n\n# Watering plan\n\nWater at dawn.\n"
+        )
+    );
+    let text = garden.wb(&["note", "show", &id]).ok();
+    assert!(
+        text.stdout.contains("\nsource:   garden diary\n"),
+        "{}",
+        text.stdout
+    );
+    let json = garden.wb(&["note", "show", &id, "--json"]).ok().json();
+    assert_eq!(json["source"], "garden diary");
+}
+
+#[test]
 fn note_add_with_nothing_writes_an_empty_note() {
     let garden = Garden::new("note-add-empty");
     let run = garden.wb(&["note", "add", "--json"]).ok();

@@ -40,7 +40,7 @@ pub enum NoteCommand {
     #[command(
         about = "Add a note. The body comes from --body, --file or stdin",
         long_about = "Add a note. The body comes from --body, --file (`-` for stdin) or stdin when it is not a terminal. Without --title, a body that starts with a `# Heading` line gives the title. A note without --section goes into the board's default section.\n\nRefused: a section the config lacks.\n\nPrints the new id and file. JSON: {id, path, board, section, stack, order, tags}",
-        after_long_help = "Examples:\n  wb --workspace boards --board garden note add --title \"Plant list\" --section Beds --tag plan --body \"Tomatoes, basil and beans.\"\n  cat plan.md | wb --workspace boards --board garden note add --section \"Beds / Spring\" --tag plan\n  wb --workspace boards --board garden note add --title \"Seed order\" --section \"Seed trays\""
+        after_long_help = "Examples:\n  wb --workspace boards --board garden note add --title \"Plant list\" --section Beds --tag plan --source \"garden diary\" --body \"Tomatoes, basil and beans.\"\n  cat plan.md | wb --workspace boards --board garden note add --section \"Beds / Spring\" --tag plan\n  wb --workspace boards --board garden note add --title \"Seed order\" --section \"Seed trays\""
     )]
     Add {
         #[arg(
@@ -56,6 +56,8 @@ pub enum NoteCommand {
         section: Option<String>,
         #[arg(long = "tag", value_name = "TAG", help = "A tag. Repeat for more")]
         tags: Vec<String>,
+        #[arg(long, help = "Where the note came from, shown small on the card")]
+        source: Option<String>,
         #[command(flatten)]
         body: BodyArgs,
     },
@@ -99,12 +101,14 @@ pub fn run(cx: &Context, command: NoteCommand) -> Result<()> {
             title,
             section,
             tags,
+            source,
             body,
         } => {
             let request = add::NewNote {
                 title,
                 section,
                 tags,
+                source: source.unwrap_or_default(),
                 body: read_body(body)?,
             };
             emit(cx.json, &add::add(cx, request)?, add::render)
