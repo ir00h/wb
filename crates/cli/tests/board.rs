@@ -166,6 +166,39 @@ fn board_list_shows_every_board_with_its_notes() {
 }
 
 #[test]
+fn board_list_keeps_listing_when_a_board_has_a_file_it_cannot_read() {
+    let scratch = Scratch::new("board-list-broken");
+    scratch.wb(&["board", "add", "garden"]).ok();
+    scratch.wb(&["board", "add", "Kitchen"]).ok();
+    scratch
+        .wb(&["--board", "kitchen", "note", "add", "--title", "Bread"])
+        .ok();
+    fs::write(
+        scratch.workspace().join("garden/board.config.json"),
+        "{\"hue\": 120, \"repos\": [\"/srv/git/garden\"]}",
+    )
+    .expect("config written");
+    fs::write(
+        scratch.workspace().join("kitchen/board.config.json"),
+        "{\"sections\": [",
+    )
+    .expect("config written");
+    assert_eq!(
+        scratch.wb(&["board", "list"]).ok().stdout,
+        "ID       NAME     NOTES  HUE  REPOS\ngarden   garden   0      120  /srv/git/garden\nkitchen  Kitchen  1      -    -\n"
+    );
+    fs::write(scratch.workspace().join("kitchen/board.json"), "{").expect("board file written");
+    assert_eq!(
+        scratch.wb(&["board", "list"]).ok().stdout,
+        "ID       NAME     NOTES  HUE  REPOS\ngarden   garden   0      120  /srv/git/garden\nkitchen  kitchen  1      -    -\n"
+    );
+    assert_eq!(
+        scratch.wb(&["board", "list", "--json"]).ok().json()[1],
+        serde_json::json!({"id": "kitchen", "name": "kitchen", "notes": 1, "repos": [], "hue": null})
+    );
+}
+
+#[test]
 fn board_show_gives_sections_tags_and_settings() {
     let garden = Garden::new("board-show");
     garden.set_default_section(&garden.beds);

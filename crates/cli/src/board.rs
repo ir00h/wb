@@ -66,9 +66,9 @@ fn list(cx: &Context) -> Result<Vec<BoardRow>> {
         .into_iter()
         .map(|info| {
             let board = cx.board_named(info.id.as_str())?;
-            let config = board.board.config()?;
+            let config = board.board.config().unwrap_or_default();
             Ok(BoardRow {
-                notes: board.board.snapshot()?.notes.len(),
+                notes: board.board.notes()?.len(),
                 id: info.id.to_string(),
                 name: info.name,
                 repos: config.repos.unwrap_or_default(),
