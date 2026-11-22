@@ -89,6 +89,18 @@ pub fn packages() -> impl Iterator<Item = &'static str> {
     LAYERS.iter().map(|layer| layer.package)
 }
 
+struct Seam {
+    package: &'static str,
+    feature: &'static str,
+    purpose: &'static str,
+}
+
+const SEAMS: &[Seam] = &[Seam {
+    package: "wb-core",
+    feature: "volume-seam",
+    purpose: "lets a caller choose how the core writes instead of probing the volume",
+}];
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Kind {
     Normal,
@@ -114,6 +126,13 @@ impl Kind {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FeatureUse {
+    package: String,
+    feature: String,
+    kind: Kind,
+}
+
 #[derive(Default)]
 struct Package {
     manifest: String,
@@ -121,6 +140,7 @@ struct Package {
     build_script: Option<String>,
     binaries: Vec<String>,
     dependencies: Vec<(String, Kind)>,
+    features_turned_on: Vec<FeatureUse>,
 }
 
 pub fn check(root: &Path) -> Result<(), String> {
@@ -131,6 +151,7 @@ pub fn check(root: &Path) -> Result<(), String> {
     let packages = parse_metadata(&metadata, root)?;
     let tracked = finding::tracked_files(root)?;
     let mut findings = table_findings(&packages);
+    findings.extend(seam_findings(&packages));
     findings.extend(nested_workspaces(root, &tracked));
     for layer in LAYERS.iter().filter(|layer| layer.pure) {
         if let Some(package) = packages.get(layer.package) {
@@ -174,6 +195,35 @@ fn table_findings(packages: &BTreeMap<String, Package>) -> Vec<Finding> {
                     ),
                 ));
             }
+        }
+    }
+    findings
+}
+
+fn seam_findings(packages: &BTreeMap<String, Package>) -> Vec<Finding> {
+    let mut findings = Vec::new();
+    for (name, package) in packages {
+        for used in &package.features_turned_on {
+            let Some(seam) = SEAMS
+                .iter()
+                .find(|seam| seam.package == used.package && seam.feature == used.feature)
+            else {
+                continue;
+            };
+            if name == seam.package && used.kind == Kind::Dev {
+                continue;
+            }
+            findings.push(Finding::whole(
+                &package.manifest,
+                format!(
+                    "{name} turns on the feature `{}` of {} as a {} dependency; only the tests of {} itself may, because it {}",
+                    seam.feature,
+                    seam.package,
+                    used.kind.name(),
+                    seam.package,
+                    seam.purpose
+                ),
+            ));
         }
     }
     findings
@@ -316,7 +366,52 @@ fn package_facts(package: &Value, root: &Path) -> Package {
         build_script: paths_of("custom-build").into_iter().next(),
         binaries: paths_of("bin"),
         dependencies,
+        features_turned_on: features_turned_on(package),
     }
+}
+
+fn features_turned_on(package: &Value) -> Vec<FeatureUse> {
+    let name = package["name"].as_str().unwrap_or_default();
+    let by_dependencies = package["dependencies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|dependency| {
+            let kind = kind_of(dependency);
+            let used = dependency["name"].as_str().unwrap_or_default();
+            dependency["features"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(move |feature| FeatureUse {
+                    package: used.to_owned(),
+                    feature: feature.to_owned(),
+                    kind,
+                })
+        });
+    let by_own_features = package["features"]
+        .as_object()
+        .into_iter()
+        .flatten()
+        .flat_map(|(own, turned_on)| {
+            turned_on
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .filter_map(move |entry| match entry.split_once('/') {
+                    Some((used, feature)) => Some((used.trim_end_matches('?'), feature)),
+                    None if own == "default" && !entry.starts_with("dep:") => Some((name, entry)),
+                    None => None,
+                })
+                .map(|(used, feature)| FeatureUse {
+                    package: used.to_owned(),
+                    feature: feature.to_owned(),
+                    kind: Kind::Normal,
+                })
+        });
+    by_dependencies.chain(by_own_features).collect()
 }
 
 fn parse_metadata(json: &str, root: &Path) -> Result<BTreeMap<String, Package>, String> {
@@ -353,8 +448,8 @@ mod tests {
     use std::path::Path;
 
     use super::{
-        Kind, Package, declares_workspace, parse_metadata, table_findings, target_findings,
-        unsafe_uses,
+        Kind, Package, declares_workspace, parse_metadata, seam_findings, table_findings,
+        target_findings, unsafe_uses,
     };
 
     fn packages(entries: &[(&str, &[(&str, Kind)])]) -> BTreeMap<String, Package> {
@@ -426,6 +521,74 @@ mod tests {
                 "crates/wb-model/Cargo.toml: wb-model (pure shapes and rules) depends directly on wb-core as a dev dependency; add it to the table in `layers.rs` if the layer may use it",
             ]
         );
+    }
+
+    #[test]
+    fn the_volume_seam_is_refused_everywhere_but_in_the_tests_of_the_core_itself() {
+        let metadata = r#"{
+            "workspace_members": ["core", "cli", "shell"],
+            "packages": [
+                {
+                    "id": "core",
+                    "name": "wb-core",
+                    "manifest_path": "/repo/crates/core/Cargo.toml",
+                    "features": { "volume-seam": [] },
+                    "dependencies": [
+                        { "name": "wb-core", "kind": "dev", "features": ["volume-seam"] }
+                    ],
+                    "targets": []
+                },
+                {
+                    "id": "cli",
+                    "name": "wb",
+                    "manifest_path": "/repo/crates/cli/Cargo.toml",
+                    "features": {},
+                    "dependencies": [
+                        { "name": "wb-core", "kind": null, "features": ["volume-seam"] },
+                        { "name": "wb-core", "kind": "dev", "features": ["volume-seam"] }
+                    ],
+                    "targets": []
+                },
+                {
+                    "id": "shell",
+                    "name": "whiteboard",
+                    "manifest_path": "/repo/crates/shell/Cargo.toml",
+                    "features": { "testing": ["wb-core?/volume-seam"] },
+                    "dependencies": [{ "name": "wb-core", "kind": null, "features": [] }],
+                    "targets": []
+                }
+            ]
+        }"#;
+        let packages = parse_metadata(metadata, Path::new("/repo")).expect("the metadata is valid");
+        let found: Vec<String> = seam_findings(&packages)
+            .into_iter()
+            .map(|finding| finding.to_string())
+            .collect();
+        assert_eq!(
+            found,
+            vec![
+                "crates/cli/Cargo.toml: wb turns on the feature `volume-seam` of wb-core as a normal dependency; only the tests of wb-core itself may, because it lets a caller choose how the core writes instead of probing the volume",
+                "crates/cli/Cargo.toml: wb turns on the feature `volume-seam` of wb-core as a dev dependency; only the tests of wb-core itself may, because it lets a caller choose how the core writes instead of probing the volume",
+                "crates/shell/Cargo.toml: whiteboard turns on the feature `volume-seam` of wb-core as a normal dependency; only the tests of wb-core itself may, because it lets a caller choose how the core writes instead of probing the volume",
+            ]
+        );
+    }
+
+    #[test]
+    fn a_core_that_turns_its_volume_seam_on_by_default_is_refused() {
+        let metadata = r#"{
+            "workspace_members": ["core"],
+            "packages": [{
+                "id": "core",
+                "name": "wb-core",
+                "manifest_path": "/repo/crates/core/Cargo.toml",
+                "features": { "default": ["volume-seam"], "volume-seam": [] },
+                "dependencies": [],
+                "targets": []
+            }]
+        }"#;
+        let packages = parse_metadata(metadata, Path::new("/repo")).expect("the metadata is valid");
+        assert_eq!(seam_findings(&packages).len(), 1);
     }
 
     #[test]
