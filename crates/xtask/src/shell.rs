@@ -11,7 +11,7 @@ const AUTOMATION_FEATURES: &str = "automation,tauri/custom-protocol";
 const JOURNEY_RUNNER: &str = "e2e/run.ts";
 const AUTOMATION_EXECUTABLE: &str = "whiteboard-automation";
 
-const CHANNEL_MARKERS: [&str; 7] = [
+const CHANNEL_MARKERS: [&str; 11] = [
     "AUTOMATION_LISTENING",
     "WB_AUTOMATION_PORT",
     "WB_AUTOMATION_BACKGROUND",
@@ -19,6 +19,10 @@ const CHANNEL_MARKERS: [&str; 7] = [
     "settle_evaluation",
     "_setWindowOcclusionDetectionEnabled",
     "OperationCount",
+    "/evaluate",
+    "/snapshot",
+    "/applied",
+    "/terminate",
 ];
 
 fn build(root: &Path, package: &str, features: Option<&str>) -> Result<PathBuf, String> {
@@ -97,7 +101,7 @@ pub fn default_clean(root: &Path) -> Result<(), String> {
         return Ok(());
     }
     Err(format!(
-        "the default {SHELL_PACKAGE} binary contains automation channel strings: {}; keep every part of the channel behind #[cfg(feature = \"automation\")]",
+        "the default {SHELL_PACKAGE} binary contains automation channel strings: {}; keep every part of the channel behind #[cfg(feature = \"automation\")]. This step reads the binary's bytes for the channel's variables, routes and type names; state kept without any of them, such as a count no route serves, is not seen",
         leaked.join(", ")
     ))
 }
