@@ -774,6 +774,80 @@ fn a_note_trashed_between_its_new_text_and_its_new_name_stays_in_the_trash() {
     );
 }
 
+fn set_title(note: &NoteId, to: &str) -> Op {
+    Op::EditNote {
+        note: note.clone(),
+        edit: NoteEdit {
+            title: Some(Change {
+                base: None,
+                to: to.to_owned(),
+            }),
+            body: None,
+        },
+    }
+}
+
+#[test]
+fn an_edit_that_looks_for_the_note_while_another_writer_renames_it_is_applied() {
+    let garden = Garden::new("renamed-during-the-look");
+    let note = garden.add_note("Harvest log", "Monday: peas.");
+    let other_writer = garden.board.clone();
+    let renamed = note.id.clone();
+    at_the_next(Moment::AfterTheListing, move |_| {
+        thread::spawn(move || other_writer.apply(set_title(&renamed, "Harvest log 2027")))
+            .join()
+            .expect("title change")
+            .expect("title changed");
+    });
+
+    let answer = garden.board.apply(append(&note.id, "Tuesday: kale."));
+
+    assert!(
+        matches!(
+            &answer,
+            Ok(Outcome::Applied { note })
+                if note.title == "Harvest log 2027" && note.body == "Monday: peas.\n\nTuesday: kale."
+        ),
+        "an edit that looked for the note while another writer renamed it answered {answer:?}"
+    );
+}
+
+#[test]
+fn an_edit_that_sees_two_files_of_a_note_whose_lock_is_held_waits_for_the_lock() {
+    let garden = Garden::new("two-files-under-a-lock");
+    let note = garden.add_note("Harvest log", "Monday: peas.");
+    let file = garden.file_of(&note);
+    let held = locks_of(&garden.folder())
+        .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
+        .expect("note lock");
+    let new_name = garden
+        .folder()
+        .join(format!("harvest-log-2027-{}.md", note.id));
+    fs::hard_link(&file, &new_name).expect("second name of the note");
+    let mut workspace = Workspace::open(&garden.root)
+        .expect("workspace")
+        .with_lock_deadline(AT_ONCE);
+    if let Some(volume) = volume_under_test() {
+        workspace = workspace.assuming_volume(volume);
+    }
+    let writer = workspace
+        .board(&"garden".parse().expect("board id"))
+        .expect("board handle");
+
+    let answer = writer.apply(append(&note.id, "Tuesday: kale."));
+    fs::remove_file(&file).expect("first name of the note");
+    drop(held);
+
+    assert!(
+        matches!(answer, Err(Error::Busy { .. })),
+        "an edit refused a note another writer held while two files held its id: {answer:?}"
+    );
+    assert!(matches!(
+        writer.apply(append(&note.id, "Tuesday: kale.")),
+        Ok(Outcome::Applied { note }) if note.body == "Monday: peas.\n\nTuesday: kale."
+    ));
+}
+
 #[test]
 fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
     if std::env::var_os(VOLUME).is_some() {

@@ -101,6 +101,13 @@ impl BoardLocks {
         &self.board
     }
 
+    pub(crate) fn was_ever_taken(&self, key: &LockKey) -> bool {
+        self.board
+            .join(LOCKS_FOLDER)
+            .join(key.file_name(SIDECAR_EXTENSION))
+            .exists()
+    }
+
     fn volume(&self, folder: &Path, key: &LockKey) -> io::Result<Volume> {
         if let Some(volume) = self.volume.get() {
             return Ok(*volume);

@@ -252,6 +252,7 @@ pub mod hook {
         AfterTheLastLook,
         BeforeTheCreation,
         BeforeTheRename,
+        AfterTheListing,
     }
 
     thread_local! {
@@ -266,7 +267,7 @@ pub mod hook {
         at_the_next(Moment::AfterTheLastLook, action);
     }
 
-    pub(super) fn run(now: Moment, path: &Path) {
+    pub(crate) fn run(now: Moment, path: &Path) {
         let due = NEXT.with(|hook| {
             let mut hook = hook.borrow_mut();
             match hook.take() {

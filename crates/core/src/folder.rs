@@ -130,9 +130,11 @@ fn holding(folder: &Path, id: &NoteId, names: Vec<String>) -> Result<Vec<Found>,
 }
 
 pub fn find(folder: &Path, id: &NoteId) -> Result<Option<Found>, Error> {
-    let (named, other): (Vec<String>, Vec<String>) = note_file_names(folder)?
-        .into_iter()
-        .partition(|name| is_named_for(name, id));
+    let listed = note_file_names(folder)?;
+    #[cfg(test)]
+    crate::replace::hook::run(crate::replace::hook::Moment::AfterTheListing, folder);
+    let (named, other): (Vec<String>, Vec<String>) =
+        listed.into_iter().partition(|name| is_named_for(name, id));
     let named = holding(folder, id, named)?;
     if named.is_empty() {
         the_one_file(id, holding(folder, id, other)?)
