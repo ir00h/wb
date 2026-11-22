@@ -46,13 +46,17 @@ export type BoardState =
 
 export type View = { readonly x: number; readonly y: number };
 
+export type Notice =
+  | { readonly kind: "message"; readonly text: string }
+  | { readonly kind: "notQuit"; readonly text: string };
+
 export type WindowState = {
   readonly board: BoardState;
   readonly interaction: Interaction;
   readonly sessions: ReadonlyMap<NoteId, EditSession>;
   readonly heights: ReadonlyMap<NoteId, number>;
   readonly view: View;
-  readonly notice: string | null;
+  readonly notice: Notice | null;
 };
 
 export const useWindow = create<WindowState>(() => ({
@@ -92,7 +96,7 @@ function cancelSave(note: NoteId): void {
 }
 
 function showNotice(text: string): void {
-  useWindow.setState({ notice: text });
+  useWindow.setState({ notice: { kind: "message", text } });
 }
 
 function applyUpdate(update: BoardUpdate): void {
@@ -322,9 +326,14 @@ function sessionsChange(until: number): Promise<void> {
 }
 
 function stayOpen(reason: string): Promise<unknown> {
-  const failure = useWindow.getState().notice;
-  showNotice(failure === null || failure === reason ? reason : `${reason} ${failure}`);
+  const failure = useWindow.getState().notice?.text ?? null;
+  const text = failure === null || failure === reason ? reason : `${reason} ${failure}`;
+  useWindow.setState({ notice: { kind: "notQuit", text } });
   return call("answerClose", { type: "stay" });
+}
+
+export function quitWithoutSaving(): void {
+  void call("answerClose", { type: "leave" });
 }
 
 let closing = false;
