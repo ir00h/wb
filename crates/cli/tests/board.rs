@@ -356,4 +356,12 @@ fn the_board_option_is_checked_and_trimmed() {
         .wb(&["--json", "--board", "garden", "section", "list"])
         .ok();
     assert_eq!(first.stdout, "[]\n");
+    let blank = scratch.wb(&["--board", " / ", "section", "list"]);
+    assert_eq!(
+        (blank.code, blank.stderr.as_str()),
+        (
+            1,
+            "No board given: pass --board <id> or set WB_BOARD; boards: garden.\n"
+        )
+    );
 }

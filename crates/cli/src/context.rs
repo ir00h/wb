@@ -28,6 +28,10 @@ impl BoardRef {
     }
 }
 
+fn board_text(text: &str) -> &str {
+    text.trim().trim_matches('/')
+}
+
 fn given(value: Option<OsString>) -> Option<OsString> {
     value.filter(|value| !value.is_empty())
 }
@@ -45,8 +49,7 @@ impl Context {
         };
         let board = board
             .or_else(|| env::var(BOARD_ENV).ok())
-            .map(|board| board.trim().trim_matches('/').to_owned())
-            .filter(|board| !board.is_empty());
+            .filter(|board| !board_text(board).is_empty());
         Ok(Context { root, json, board })
     }
 
@@ -62,7 +65,7 @@ impl Context {
 
     pub fn board_named(&self, text: &str) -> Result<BoardRef> {
         let workspace = self.workspace()?;
-        let text = text.trim().trim_matches('/');
+        let text = board_text(text);
         let Ok(id) = BoardId::parse(text) else {
             fail!(
                 "\"{text}\" is not a board id; ids are folder paths like {BOARD_ID_EXAMPLE}{}",
