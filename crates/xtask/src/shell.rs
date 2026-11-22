@@ -6,6 +6,7 @@ use serde_json::Value;
 use crate::{process, window};
 
 const SHELL_PACKAGE: &str = "whiteboard";
+const CLI_PACKAGE: &str = "wb";
 const AUTOMATION_FEATURES: &str = "automation,tauri/custom-protocol";
 const JOURNEY_RUNNER: &str = "e2e/run.ts";
 const AUTOMATION_EXECUTABLE: &str = "whiteboard-automation";
@@ -19,12 +20,12 @@ const CHANNEL_MARKERS: [&str; 6] = [
     "_setWindowOcclusionDetectionEnabled",
 ];
 
-fn build(root: &Path, features: Option<&str>) -> Result<PathBuf, String> {
+fn build(root: &Path, package: &str, features: Option<&str>) -> Result<PathBuf, String> {
     let mut argv = vec![
         "cargo",
         "build",
         "--package",
-        SHELL_PACKAGE,
+        package,
         "--locked",
         "--message-format",
         "json-render-diagnostics",
@@ -33,20 +34,16 @@ fn build(root: &Path, features: Option<&str>) -> Result<PathBuf, String> {
         argv.extend(["--features", features]);
     }
     let messages = process::output(root, &argv)?;
-    executable_in(&messages).ok_or_else(|| {
-        format!(
-            "`{}` reported no {SHELL_PACKAGE} executable",
-            argv.join(" ")
-        )
-    })
+    executable_in(&messages, package)
+        .ok_or_else(|| format!("`{}` reported no {package} executable", argv.join(" ")))
 }
 
-fn executable_in(messages: &str) -> Option<PathBuf> {
+fn executable_in(messages: &str, package: &str) -> Option<PathBuf> {
     messages
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
         .filter(|message| {
-            message["reason"] == "compiler-artifact" && message["target"]["name"] == SHELL_PACKAGE
+            message["reason"] == "compiler-artifact" && message["target"]["name"] == package
         })
         .find_map(|message| message["executable"].as_str().map(PathBuf::from))
 }
@@ -54,7 +51,8 @@ fn executable_in(messages: &str) -> Option<PathBuf> {
 pub fn journeys(root: &Path) -> Result<(), String> {
     window::ensure_packages(root)?;
     process::output(root, &["pnpm", "exec", "vite", "build"])?;
-    let built = build(root, Some(AUTOMATION_FEATURES))?;
+    let wb = build(root, CLI_PACKAGE, None)?;
+    let built = build(root, SHELL_PACKAGE, Some(AUTOMATION_FEATURES))?;
     let shell = built.with_file_name(AUTOMATION_EXECUTABLE);
     copy_to_new_file(&built, &shell).map_err(|error| {
         format!(
@@ -66,6 +64,7 @@ pub fn journeys(root: &Path) -> Result<(), String> {
     let output = Command::new("node")
         .arg(JOURNEY_RUNNER)
         .env("WB_E2E_SHELL", &shell)
+        .env("WB_E2E_WB", &wb)
         .current_dir(root)
         .output()
         .map_err(|error| format!("`node {JOURNEY_RUNNER}` could not start: {error}"))?;
@@ -89,7 +88,7 @@ fn copy_to_new_file(from: &Path, to: &Path) -> std::io::Result<u64> {
 }
 
 pub fn default_clean(root: &Path) -> Result<(), String> {
-    let shell = build(root, None)?;
+    let shell = build(root, SHELL_PACKAGE, None)?;
     let binary = std::fs::read(&shell)
         .map_err(|error| format!("cannot read {}: {error}", shell.display()))?;
     let leaked = leaked_markers(&binary);
@@ -138,7 +137,7 @@ mod tests {
         ]
         .join("\n");
         assert_eq!(
-            executable_in(&messages),
+            executable_in(&messages, "whiteboard"),
             Some(PathBuf::from("/build/debug/whiteboard"))
         );
     }
