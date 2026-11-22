@@ -383,3 +383,38 @@ fn taking_a_lock_removes_what_a_killed_holder_of_that_lock_left() {
         [of_another_note.display().to_string()]
     );
 }
+
+#[test]
+fn a_file_that_changed_before_the_exchange_is_never_exchanged() {
+    let garden = Garden::new("changed-before");
+    let note = garden.add_note("Plant list", "Tomatoes");
+    let file = garden.file_of(&note);
+    let name = file
+        .file_name()
+        .expect("name")
+        .to_string_lossy()
+        .into_owned();
+    let held = BoardLocks::of_board(&garden.folder())
+        .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
+        .expect("note lock");
+    let target = Target::Note {
+        id: &note.id,
+        name: &name,
+    };
+    fs::write(&file, "written by another program").expect("outside edit");
+
+    before_the_next_exchange(|_| panic!("the file was exchanged although it had changed"));
+    let replaced = replace_if_unchanged(&held, target, b"read earlier", b"new").expect("answer");
+    before_the_next_exchange(|_| {});
+
+    assert_eq!(
+        replaced,
+        Replaced::Changed {
+            now: b"written by another program".to_vec()
+        }
+    );
+    assert_eq!(
+        fs::read(&file).expect("note file"),
+        b"written by another program"
+    );
+}

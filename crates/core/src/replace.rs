@@ -124,6 +124,12 @@ fn exchange_unless_changed(
         Err(error) => return Err(error),
     };
     write_temporary(temporary, new, Some(permissions))?;
+    match fs::read(path) {
+        Ok(on_disk) if on_disk == read => {}
+        Ok(on_disk) => return Ok(Replaced::Changed { now: on_disk }),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
+        Err(error) => return Err(error),
+    }
     #[cfg(test)]
     hook::run(path);
     match platform::exchange(temporary, path) {
