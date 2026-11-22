@@ -157,9 +157,10 @@ fn show(cx: &Context, id: Option<&str>) -> Result<ShownBoard> {
             .then_with(|| one.name.cmp(&other.name))
     });
     let section_path = |id: Option<&String>| {
-        id.and_then(|id| SectionId::parse(id).ok())
-            .filter(|id| sections.contains(id))
-            .map(|id| section::path_text(&sections, &id))
+        id.map(|text| match SectionId::parse(text) {
+            Ok(id) if sections.contains(&id) => section::path_text(&sections, &id),
+            _ => section::missing(text),
+        })
     };
     let rules = files
         .iter()

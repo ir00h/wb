@@ -150,6 +150,10 @@ pub fn rows(config: &BoardConfig, notes: &[NoteFile]) -> Vec<SectionRow> {
     rows
 }
 
+pub fn missing(id: &str) -> String {
+    format!("{id} (missing)")
+}
+
 pub fn layout_text(layout: Option<&Value>) -> String {
     layout.map_or_else(|| or_dash(None), Value::to_string)
 }
@@ -170,7 +174,7 @@ pub fn render_tree(rows: &[SectionRow]) -> String {
     let path = |id: &str| {
         rows.iter()
             .find(|row| row.id == id)
-            .map_or_else(|| format!("{id} (missing)"), |row| row.path.clone())
+            .map_or_else(|| missing(id), |row| row.path.clone())
     };
     let lines: Vec<Vec<String>> = rows
         .iter()

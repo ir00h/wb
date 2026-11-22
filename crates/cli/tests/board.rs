@@ -279,6 +279,35 @@ Rules: none; `wb rules init` writes a first version
 }
 
 #[test]
+fn board_show_names_a_default_or_archive_section_the_config_lacks_as_missing() {
+    let scratch = Scratch::new("board-show-missing-default");
+    scratch.wb(&["board", "add", "garden"]).ok();
+    fs::write(
+        scratch.workspace().join("garden/board.config.json"),
+        "{\"sections\": [{\"id\": \"sbeds00\", \"name\": \"Beds\"}], \"defaultSection\": \"sgone01\", \"archiveSection\": \"sbeds00\"}",
+    )
+    .expect("config written");
+    let text = scratch.wb(&["--board", "garden", "board", "show"]).ok();
+    assert!(
+        text.stdout
+            .contains("\nDefault section: sgone01 (missing)\nArchive section: Beds\n"),
+        "{}",
+        text.stdout
+    );
+    let json = scratch
+        .wb(&["--board", "garden", "board", "show", "--json"])
+        .ok()
+        .json();
+    assert_eq!(
+        (&json["defaultSection"], &json["archiveSection"]),
+        (
+            &serde_json::json!("sgone01 (missing)"),
+            &serde_json::json!("Beds")
+        )
+    );
+}
+
+#[test]
 fn board_show_without_sections_and_its_errors() {
     let scratch = Scratch::new("board-show-errors");
     scratch.wb(&["board", "add", "garden"]).ok();
