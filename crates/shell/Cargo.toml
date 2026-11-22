@@ -15,7 +15,6 @@ automation = [
   "dep:serde",
   "dep:tiny_http",
   "dep:block2",
-  "dep:objc2",
   "dep:objc2-foundation",
   "dep:rustix",
 ]
@@ -37,7 +36,7 @@ rustix = { workspace = true, optional = true, features = ["process"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = { workspace = true, optional = true }
-objc2 = { workspace = true, optional = true }
+objc2.workspace = true
 objc2-foundation = { workspace = true, optional = true, features = ["std", "NSData", "NSGeometry", "NSRange", "NSString"] }
 
 [lints]

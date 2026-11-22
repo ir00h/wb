@@ -1,13 +1,15 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen as listenToShell } from "@tauri-apps/api/event";
 import type { CallFailure } from "../bindings/CallFailure";
-import type { BoardEventPayload, Calls } from "../bindings/Calls";
-import { BOARD_EVENT, ERROR_TYPES } from "../bindings/Calls";
+import type { Calls, Events } from "../bindings/Calls";
+import { ERROR_TYPES } from "../bindings/Calls";
 import type { CoreError } from "../bindings/CoreError";
 
 const SHELL_COMMAND = "call";
 
 export type CallName = keyof Calls;
+
+export type EventName = keyof Events;
 
 export type Answer<K extends CallName> =
   | { readonly kind: "replied"; readonly reply: Calls[K]["reply"] }
@@ -53,18 +55,19 @@ export async function call<K extends CallName>(
   }
 }
 
-export function listen(handler: (update: BoardEventPayload) => void): () => void {
+export function listen<K extends EventName>(
+  name: K,
+  handler: (payload: Events[K]) => void,
+): () => void {
   let stopped = false;
   let stop: (() => void) | null = null;
-  void listenToShell<BoardEventPayload>(BOARD_EVENT, (event) => handler(event.payload)).then(
-    (unlisten) => {
-      if (stopped) {
-        unlisten();
-      } else {
-        stop = unlisten;
-      }
-    },
-  );
+  void listenToShell<Events[K]>(name, (event) => handler(event.payload)).then((unlisten) => {
+    if (stopped) {
+      unlisten();
+    } else {
+      stop = unlisten;
+    }
+  });
   return () => {
     stopped = true;
     stop?.();

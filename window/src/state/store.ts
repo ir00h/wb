@@ -1,13 +1,14 @@
 import { create } from "zustand";
 import type { BoardId } from "../bindings/BoardId";
 import type { BoardSnapshot } from "../bindings/BoardSnapshot";
-import type { BoardEventPayload } from "../bindings/Calls";
+import type { Events } from "../bindings/Calls";
 import type { NoteId } from "../bindings/NoteId";
 import type { Outcome } from "../bindings/Outcome";
 import { call, listen, runsInDesktopShell } from "../bridge/desktop";
 import { applyEvents } from "../domain/board";
 import {
   beginEditing,
+  closeVerdict,
   type EditEffect,
   type EditEvent,
   type EditSession,
@@ -23,6 +24,12 @@ import {
 } from "../domain/interaction";
 
 export const SAVE_PAUSE_MS = 700;
+const CLOSE_WAIT_MS = 5_000;
+const CLOSE_SEND_ROUNDS = 2;
+const UNSAVED_ON_CLOSE = "Whiteboard did not quit, because typed text could not be saved.";
+const NO_ANSWER_ON_CLOSE = "Whiteboard did not quit, because a save got no answer in time.";
+
+type BoardUpdate = Events["board"];
 
 export type BoardState =
   | { readonly kind: "opening" }
@@ -81,7 +88,7 @@ function showNotice(text: string): void {
   useWindow.setState({ notice: text });
 }
 
-function applyUpdate(update: BoardEventPayload): void {
+function applyUpdate(update: BoardUpdate): void {
   const snapshot = openSnapshot();
   if (snapshot === null || snapshot.board.id !== update.board) {
     return;
@@ -235,6 +242,73 @@ export function dismissNotice(): void {
   useWindow.setState({ notice: null });
 }
 
+function sessionsChange(until: number): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      unsubscribe();
+      resolve();
+    };
+    const timer = setTimeout(done, Math.max(0, until - Date.now()));
+    const unsubscribe = useWindow.subscribe((state, before) => {
+      if (state.sessions !== before.sessions) {
+        done();
+      }
+    });
+  });
+}
+
+function stayOpen(reason: string): Promise<unknown> {
+  const failure = useWindow.getState().notice;
+  showNotice(failure === null || failure === reason ? reason : `${reason} ${failure}`);
+  return call("answerClose", { type: "stay" });
+}
+
+let closing = false;
+
+async function answerClose(): Promise<void> {
+  if (closing) {
+    return;
+  }
+  closing = true;
+  try {
+    const deadline = Date.now() + CLOSE_WAIT_MS;
+    let rounds = 0;
+    for (;;) {
+      const verdict = closeVerdict(useWindow.getState().sessions.values());
+      switch (verdict.kind) {
+        case "leave":
+          await call("answerClose", { type: "leave" });
+          return;
+        case "stay":
+          await stayOpen(verdict.reason);
+          return;
+        case "send":
+          if (rounds === CLOSE_SEND_ROUNDS) {
+            await stayOpen(UNSAVED_ON_CLOSE);
+            return;
+          }
+          rounds += 1;
+          for (const note of verdict.notes) {
+            edit(note, { type: "saveDue" });
+          }
+          break;
+        case "wait":
+          if (Date.now() >= deadline) {
+            await stayOpen(NO_ANSWER_ON_CLOSE);
+            return;
+          }
+          await sessionsChange(deadline);
+          break;
+        default:
+          unreachable(verdict);
+      }
+    }
+  } finally {
+    closing = false;
+  }
+}
+
 let started = false;
 
 export async function start(): Promise<void> {
@@ -246,9 +320,12 @@ export async function start(): Promise<void> {
     useWindow.setState({ board: { kind: "preview" } });
     return;
   }
-  const early: BoardEventPayload[] = [];
+  const early: BoardUpdate[] = [];
   let opened = false;
-  listen((update) => {
+  listen("closeRequested", () => {
+    void answerClose();
+  });
+  listen("board", (update) => {
     if (opened) {
       applyUpdate(update);
     } else {

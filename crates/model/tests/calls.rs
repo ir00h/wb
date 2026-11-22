@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use wb_model::{
-    ApplyOp, BoardId, BoardInfo, BoardSnapshot, Boards, CALLS, CallFailure, Error, Handler,
-    NoteCard, NoteId, OpenBoard, Outcome, dispatch,
+    ApplyOp, BoardId, BoardInfo, BoardSnapshot, Boards, CALLS, CallFailure, CloseAnswer, Error,
+    Handler, NoteCard, NoteId, OpenBoard, Outcome, dispatch,
 };
 
 struct Garden;
@@ -34,6 +34,13 @@ impl Handler for Garden {
             },
         })
     }
+
+    fn answer_close(&self, answer: CloseAnswer) -> Result<(), Error> {
+        match answer {
+            CloseAnswer::Leave => Ok(()),
+            CloseAnswer::Stay => Err(Error::NoBoardToOpen),
+        }
+    }
 }
 
 fn failure(outcome: Result<Value, CallFailure>) -> Value {
@@ -42,7 +49,7 @@ fn failure(outcome: Result<Value, CallFailure>) -> Value {
 
 #[test]
 fn every_call_of_the_table_reaches_its_handler() {
-    assert_eq!(CALLS, ["listBoards", "openBoard", "apply"]);
+    assert_eq!(CALLS, ["listBoards", "openBoard", "apply", "answerClose"]);
     assert_eq!(
         dispatch(&Garden, "listBoards", Value::Null).expect("listed"),
         json!({ "boards": [{ "id": "garden", "name": "Garden" }] })
@@ -55,6 +62,14 @@ fn every_call_of_the_table_reaches_its_handler() {
     .expect("applied");
     assert_eq!(applied["type"], "applied");
     assert_eq!(applied["note"]["title"], "kitchen");
+    assert_eq!(
+        dispatch(&Garden, "answerClose", json!({ "type": "leave" })).expect("answered"),
+        Value::Null
+    );
+    assert_eq!(
+        failure(dispatch(&Garden, "answerClose", json!({ "type": "stay" })))["error"]["type"],
+        "noBoardToOpen"
+    );
 }
 
 #[test]
@@ -78,7 +93,7 @@ fn unknown_calls_and_arguments_that_do_not_fit_are_refused() {
     assert_eq!(unknown["error"]["type"], "badCall");
     assert_eq!(
         unknown["error"]["message"],
-        "there is no such call; the calls are listBoards, openBoard, apply"
+        "there is no such call; the calls are listBoards, openBoard, apply, answerClose"
     );
     let misfit = failure(dispatch(
         &Garden,

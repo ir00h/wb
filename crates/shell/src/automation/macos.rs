@@ -83,6 +83,13 @@ fn png_of(image: *mut AnyObject) -> Result<Vec<u8>, String> {
     }
 }
 
+pub fn terminate() {
+    unsafe {
+        let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
+        let () = msg_send![app, terminate: ptr::null::<AnyObject>()];
+    }
+}
+
 const KEY_DOWN: usize = 10;
 const KEY_UP: usize = 11;
 const LEFT_MOUSE_DOWN: usize = 1;

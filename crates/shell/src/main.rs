@@ -2,7 +2,10 @@
 
 #[cfg(feature = "automation")]
 mod automation;
+mod closing;
 mod host;
+#[cfg(target_os = "macos")]
+mod macos;
 mod settings;
 mod watch;
 
@@ -10,9 +13,10 @@ use std::error::Error;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use tauri::{App, Manager, WebviewWindowBuilder};
+use tauri::{App, AppHandle, Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 use wb_core::Workspace;
 
+use crate::closing::{Closing, ExitRequest};
 use crate::host::Host;
 use crate::settings::{BOARD_VARIABLE, WORKSPACE_VARIABLE, settings};
 
@@ -51,10 +55,22 @@ fn run() -> Result<(), Box<dyn Error>> {
 
     let app = builder
         .setup(move |app| {
+            let asking = app.handle().clone();
+            let exiting = app.handle().clone();
+            let closing = Closing::new(
+                move || {
+                    let _ = asking.emit(wb_model::CLOSE_REQUESTED_EVENT, ());
+                },
+                move || exiting.exit(0),
+            );
+            #[cfg(target_os = "macos")]
+            macos::route_quit_requests(&closing)?;
+            app.manage(Arc::clone(&closing));
             app.manage(Arc::new(Host::new(
                 workspace,
                 settings.board,
                 app.handle().clone(),
+                closing,
             )));
             let window = main_window(app)?;
             #[cfg(feature = "automation")]
@@ -67,8 +83,27 @@ fn run() -> Result<(), Box<dyn Error>> {
     #[cfg(feature = "automation")]
     let app = automation.prepare_app(app);
 
-    app.run(|_, _| {});
+    app.run(follow_close_requests);
     Ok(())
+}
+
+fn follow_close_requests(app: &AppHandle, event: RunEvent) {
+    let closing = || Arc::clone(&app.state::<Arc<Closing>>());
+    match event {
+        RunEvent::ExitRequested { api, .. } => {
+            if let ExitRequest::Prevent = closing().exit_requested() {
+                api.prevent_exit();
+            }
+        }
+        RunEvent::WindowEvent {
+            event: WindowEvent::CloseRequested { api, .. },
+            ..
+        } => {
+            api.prevent_close();
+            closing().ask_window();
+        }
+        _ => {}
+    }
 }
 
 fn main_window(app: &App) -> tauri::Result<WebviewWindowBuilder<'_, tauri::Wry, App>> {

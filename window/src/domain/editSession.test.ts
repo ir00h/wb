@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import { noteId } from "./boards.fixture";
 import {
   beginEditing,
+  closeVerdict,
   type EditEvent,
   type EditSession,
   type EditStep,
+  KEPT_OPEN_FOR_CONFLICT,
   stepEdit,
 } from "./editSession";
 
@@ -99,5 +101,29 @@ describe("edit session", () => {
       { type: "end" },
       { type: "notice", text: "Another program removed this note before your text was saved." },
     ]);
+  });
+});
+
+describe("closing the window", () => {
+  const typed = run([{ type: "typed", draft: "Tomatoes, beans" }]).session;
+  const saving = stepEdit(typed, { type: "saveDue" }).session;
+  const clean = beginEditing(noteId("n2"), "Peas");
+  const conflicted = stepEdit(saving, { type: "conflict", current: "Potatoes" }).session;
+
+  it("leaves when nothing typed is unsaved", () => {
+    expect(closeVerdict([])).toEqual({ kind: "leave" });
+    expect(closeVerdict([clean])).toEqual({ kind: "leave" });
+  });
+
+  it("sends typed text that waits for its pause, then waits for the answer", () => {
+    expect(closeVerdict([clean, typed])).toEqual({ kind: "send", notes: [plantList] });
+    expect(closeVerdict([saving, typed])).toEqual({ kind: "wait" });
+  });
+
+  it("stays open while a conflict holds typed text", () => {
+    expect(closeVerdict([clean, conflicted])).toEqual({
+      kind: "stay",
+      reason: KEPT_OPEN_FOR_CONFLICT,
+    });
   });
 });

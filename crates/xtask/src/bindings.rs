@@ -7,8 +7,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use ts_rs::{Config, ExportError, TS};
 use wb_model::{
     ApplyOp, BoardEvent, BoardId, BoardInfo, BoardSnapshot, BoardUpdate, Boards, BodyChange,
-    CallFailure, Change, DraftSection, Error, Invalid, NoteCard, NoteDraft, NoteEdit, NoteId, Op,
-    OpenBoard, Outcome, SectionId, SectionNode, SectionPath, SectionRef, TITLE_BAR, Tag, TagHue,
+    CallFailure, Change, CloseAnswer, DraftSection, Error, Invalid, NoteCard, NoteDraft, NoteEdit,
+    NoteId, Op, OpenBoard, Outcome, SectionId, SectionNode, SectionPath, SectionRef, TITLE_BAR,
+    Tag, TagHue,
 };
 
 use crate::finding;
@@ -49,6 +50,7 @@ fn export_every_type(config: &Config) -> Result<(), ExportError> {
     ApplyOp::export_all(config)?;
     BoardUpdate::export_all(config)?;
     CallFailure::export_all(config)?;
+    CloseAnswer::export_all(config)?;
     Ok(())
 }
 
@@ -83,6 +85,7 @@ fn crossing_types(config: &Config) -> BTreeMap<TypeId, String> {
         named::<ApplyOp>(config),
         named::<Outcome>(config),
         named::<BoardUpdate>(config),
+        named::<CloseAnswer>(config),
     ])
 }
 
@@ -113,9 +116,12 @@ fn calls_file(config: &Config) -> Result<String, String> {
         ));
         imports.extend([args, reply]);
     }
-    let event = wb_model::event_shape();
-    let payload = ts_name(&types, event.name, event.args)?;
-    imports.insert(payload.clone());
+    let mut events = Vec::new();
+    for shape in wb_model::event_shapes() {
+        let payload = ts_name(&types, shape.name, shape.args)?;
+        events.push(format!("  {}: {payload};", shape.name));
+        imports.insert(payload);
+    }
     imports.remove("null");
     let mut imports: Vec<String> = imports.into_iter().collect();
     imports.sort_by_key(|name| import_order(name));
@@ -128,8 +134,9 @@ fn calls_file(config: &Config) -> Result<String, String> {
     lines.extend(entries);
     lines.push("};".to_owned());
     lines.push(String::new());
-    lines.push(format!("export const BOARD_EVENT = \"{}\";", event.name));
-    lines.push(format!("export type BoardEventPayload = {payload};"));
+    lines.push("export type Events = {".to_owned());
+    lines.extend(events);
+    lines.push("};".to_owned());
     lines.push(String::new());
     lines.push(format!(
         "export const ERROR_TYPES = [{}] as const;",

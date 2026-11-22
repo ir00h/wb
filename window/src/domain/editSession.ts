@@ -196,3 +196,38 @@ export function stepEdit(session: EditSession, event: EditEvent): EditStep {
       return unreachable(event);
   }
 }
+
+export type CloseVerdict =
+  | { readonly kind: "leave" }
+  | { readonly kind: "send"; readonly notes: readonly NoteId[] }
+  | { readonly kind: "wait" }
+  | { readonly kind: "stay"; readonly reason: string };
+
+export const KEPT_OPEN_FOR_CONFLICT =
+  "Whiteboard did not quit: another program changed a note you are editing. Choose Keep mine or Take theirs first.";
+
+export function closeVerdict(sessions: Iterable<EditSession>): CloseVerdict {
+  const dirty: NoteId[] = [];
+  let conflicted = false;
+  for (const session of sessions) {
+    const phase = session.phase;
+    switch (phase.kind) {
+      case "clean":
+        break;
+      case "saving":
+        return { kind: "wait" };
+      case "dirty":
+        dirty.push(session.note);
+        break;
+      case "conflict":
+        conflicted = true;
+        break;
+      default:
+        unreachable(phase);
+    }
+  }
+  if (dirty.length > 0) {
+    return { kind: "send", notes: dirty };
+  }
+  return conflicted ? { kind: "stay", reason: KEPT_OPEN_FOR_CONFLICT } : { kind: "leave" };
+}

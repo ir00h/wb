@@ -40,6 +40,14 @@ pub struct BoardUpdate {
     pub events: Vec<BoardEvent>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS))]
+pub enum CloseAnswer {
+    Leave,
+    Stay,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS))]
@@ -89,15 +97,14 @@ fn bad_call(call: &str, message: &impl ToString) -> CallFailure {
 macro_rules! call_table {
     (
         calls { $( $method:ident = $wire:literal ( $args:ty ) -> $reply:ty ; )* }
-        event $event:literal ( $payload:ty ) ;
+        events { $( $event:ident = $event_wire:literal ( $payload:ty ) ; )* }
     ) => {
         pub trait Handler {
             $( fn $method(&self, args: $args) -> Result<$reply, Error>; )*
         }
 
         pub const CALLS: &[&str] = &[ $( $wire ),* ];
-        pub const BOARD_EVENT: &str = $event;
-        pub type BoardEventPayload = $payload;
+        $( pub const $event: &str = $event_wire; )*
 
         pub fn dispatch<H: Handler + ?Sized>(
             handler: &H,
@@ -128,8 +135,10 @@ macro_rules! call_table {
         }
 
         #[must_use]
-        pub fn event_shape() -> CallShape {
-            CallShape { name: $event, args: TypeId::of::<$payload>(), reply: TypeId::of::<()>() }
+        pub fn event_shapes() -> Vec<CallShape> {
+            alloc::vec![
+                $( CallShape { name: $event_wire, args: TypeId::of::<$payload>(), reply: TypeId::of::<()>() } ),*
+            ]
         }
     };
 }
@@ -139,6 +148,10 @@ call_table! {
         list_boards = "listBoards" (()) -> Boards;
         open_board = "openBoard" (OpenBoard) -> BoardSnapshot;
         apply = "apply" (ApplyOp) -> Outcome;
+        answer_close = "answerClose" (CloseAnswer) -> ();
     }
-    event "board" (BoardUpdate);
+    events {
+        BOARD_EVENT = "board" (BoardUpdate);
+        CLOSE_REQUESTED_EVENT = "closeRequested" (());
+    }
 }

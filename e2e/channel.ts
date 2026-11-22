@@ -12,6 +12,7 @@ import type {
   Point,
   RunningApp,
   WaitOptions,
+  WayOut,
   WindowFacts,
 } from "./driver.ts";
 
@@ -281,16 +282,27 @@ class ChannelApp implements RunningApp {
     return (await response.json()) as WindowFacts;
   }
 
-  async quit(): Promise<void> {
-    await this.#request("POST", "/quit");
+  async askToQuit(way: WayOut): Promise<void> {
+    await this.#request("POST", `/${way}`);
+  }
+
+  async exited(timeout: number): Promise<boolean> {
     const outcome = await Promise.race([
       exited(this.#child).then(() => "exited"),
-      sleep(QUIT_TIMEOUT_MS).then(() => "running"),
+      sleep(timeout).then(() => "running"),
     ]);
     if (outcome === "running") {
-      throw new Error(`the app was still running ${QUIT_TIMEOUT_MS} ms after it was asked to quit`);
+      return false;
     }
     this.#checkFocus();
+    return true;
+  }
+
+  async quit(): Promise<void> {
+    await this.askToQuit("quit");
+    if (!(await this.exited(QUIT_TIMEOUT_MS))) {
+      throw new Error(`the app was still running ${QUIT_TIMEOUT_MS} ms after it was asked to quit`);
+    }
   }
 
   isRunning(): boolean {

@@ -84,7 +84,10 @@ const LAYERS: &[Layer] = &[
 ];
 
 const ROOT_MANIFEST: &str = "Cargo.toml";
-const UNSAFE_CODE_HOME: &str = "crates/shell/src/automation/macos.rs";
+const UNSAFE_CODE_HOMES: [&str; 2] = [
+    "crates/shell/src/automation/macos.rs",
+    "crates/shell/src/macos.rs",
+];
 const UNSAFE_WORDS: [&str; 2] = ["unsafe", "unsafe_code"];
 
 pub fn packages() -> impl Iterator<Item = &'static str> {
@@ -164,7 +167,7 @@ pub fn check(root: &Path) -> Result<(), String> {
         let is_rust = Path::new(path)
             .extension()
             .is_some_and(|extension| extension == "rs");
-        if !is_rust || path == UNSAFE_CODE_HOME {
+        if !is_rust || UNSAFE_CODE_HOMES.contains(&path.as_str()) {
             continue;
         }
         if let Ok(text) = std::fs::read_to_string(root.join(path)) {
@@ -242,7 +245,8 @@ fn unsafe_uses(path: &str, text: &str) -> Vec<Finding> {
                 path,
                 line_of(text, offset),
                 format!(
-                    "`{word}` outside {UNSAFE_CODE_HOME}; only the automation channel's native web view calls may use unsafe code, so find a safe API or move the call there"
+                    "`{word}` outside {}; only the shell's native macOS calls may use unsafe code, so find a safe API or move the call there",
+                    UNSAFE_CODE_HOMES.join(" and ")
                 ),
             ));
         }

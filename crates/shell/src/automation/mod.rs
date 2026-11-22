@@ -20,7 +20,7 @@ const RUNNER_VARIABLE: &str = "WB_AUTOMATION_RUNNER";
 const LISTENING_ANNOUNCEMENT: &str = "AUTOMATION_LISTENING";
 const SETTLE_COMMAND: &str = "settle_evaluation";
 const EVALUATION_TIMEOUT: Duration = Duration::from_secs(10);
-const ROUTES: &str = "POST /evaluate, POST /type, POST /key, POST /click, GET /snapshot, GET /window, GET /applied, POST /quit";
+const ROUTES: &str = "POST /evaluate, POST /type, POST /key, POST /click, GET /snapshot, GET /window, GET /applied, POST /close, POST /terminate, POST /quit";
 #[cfg(unix)]
 const RUNNER_POLL: Duration = Duration::from_millis(200);
 
@@ -376,6 +376,8 @@ enum Route {
     Snapshot,
     Window,
     Applied,
+    Close,
+    Terminate,
     Quit,
 }
 
@@ -389,6 +391,8 @@ impl Route {
             (Method::Get, "/snapshot") => Some(Route::Snapshot),
             (Method::Get, "/window") => Some(Route::Window),
             (Method::Get, "/applied") => Some(Route::Applied),
+            (Method::Post, "/close") => Some(Route::Close),
+            (Method::Post, "/terminate") => Some(Route::Terminate),
             (Method::Post, "/quit") => Some(Route::Quit),
             _ => None,
         }
@@ -419,10 +423,14 @@ fn serve(server: &Server, window: &WebviewWindow, background: bool) {
                 Some(Route::Snapshot) => snapshot(window),
                 Some(Route::Window) => window_facts(window, background),
                 Some(Route::Applied) => applied_counts(),
+                Some(Route::Close) => match window.close() {
+                    Ok(()) => Reply::Json("null".to_owned()),
+                    Err(error) => Reply::Failed(error.to_string()),
+                },
+                Some(Route::Terminate) => terminate(window),
                 Some(Route::Quit) => {
-                    let _ = request.respond(Reply::Json("null".to_owned()).into_response());
                     window.app_handle().exit(0);
-                    return;
+                    Reply::Json("null".to_owned())
                 }
                 None => Reply::NotFound,
             }
@@ -618,6 +626,19 @@ fn click(window: &WebviewWindow, body: &str) -> Reply {
     done(on_main_thread(window, move |webview, reply| {
         let _ = reply.send(macos::click(webview, &at));
     }))
+}
+
+#[cfg(target_os = "macos")]
+fn terminate(window: &WebviewWindow) -> Reply {
+    done(on_main_thread(window, |_, reply| {
+        let _ = reply.send(Ok(()));
+        macos::terminate();
+    }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn terminate(_window: &WebviewWindow) -> Reply {
+    Reply::Failed("asking the app to quit as the menu does exists only on macOS".to_owned())
 }
 
 #[cfg(not(target_os = "macos"))]

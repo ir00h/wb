@@ -8,6 +8,8 @@ export type LaunchOptions = {
 
 export type Key = "Escape" | "Enter" | "Tab" | "Backspace";
 
+export type WayOut = "quit" | "close" | "terminate";
+
 export type Point = { readonly x: number; readonly y: number };
 
 export type AppliedCount = {
@@ -53,6 +55,8 @@ export interface RunningApp {
   applied(): Promise<readonly AppliedCount[]>;
   snapshot(path: string): Promise<void>;
   window(): Promise<WindowFacts>;
+  askToQuit(way: WayOut): Promise<void>;
+  exited(timeout: number): Promise<boolean>;
   quit(): Promise<void>;
   isRunning(): boolean;
 }

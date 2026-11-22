@@ -5,10 +5,11 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, State};
 use wb_core::Workspace;
 use wb_model::{
-    ApplyOp, BOARD_EVENT, BoardId, BoardSnapshot, BoardUpdate, Boards, CallFailure, Error, Handler,
-    OpenBoard, Outcome, dispatch,
+    ApplyOp, BOARD_EVENT, BoardId, BoardSnapshot, BoardUpdate, Boards, CallFailure, CloseAnswer,
+    Error, Handler, OpenBoard, Outcome, dispatch,
 };
 
+use crate::closing::Closing;
 use crate::watch::{BoardWatch, Publish};
 
 const LOCK_DEADLINE: Duration = Duration::from_secs(2);
@@ -17,6 +18,7 @@ pub struct Host {
     workspace: Workspace,
     first_board: Option<BoardId>,
     watch: BoardWatch,
+    closing: Arc<Closing>,
 }
 
 struct Window(AppHandle);
@@ -28,11 +30,17 @@ impl Publish for Window {
 }
 
 impl Host {
-    pub fn new(workspace: Workspace, first_board: Option<BoardId>, app: AppHandle) -> Host {
+    pub fn new(
+        workspace: Workspace,
+        first_board: Option<BoardId>,
+        app: AppHandle,
+        closing: Arc<Closing>,
+    ) -> Host {
         Host {
             workspace: workspace.with_lock_deadline(LOCK_DEADLINE),
             first_board,
             watch: BoardWatch::start(Window(app)),
+            closing,
         }
     }
 }
@@ -59,12 +67,18 @@ impl Handler for Host {
     }
 
     fn apply(&self, args: ApplyOp) -> Result<Outcome, Error> {
+        let _in_flight = self.closing.operation();
         #[cfg(feature = "automation")]
         let applied = crate::automation::Applied::of(&args.op);
         let outcome = self.workspace.board(&args.board)?.apply(args.op)?;
         #[cfg(feature = "automation")]
         applied.record();
         Ok(outcome)
+    }
+
+    fn answer_close(&self, answer: CloseAnswer) -> Result<(), Error> {
+        self.closing.answer(answer);
+        Ok(())
     }
 }
 
