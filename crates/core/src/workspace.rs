@@ -14,6 +14,7 @@ use crate::volume::Volume;
 pub const DEFAULT_LOCK_DEADLINE: Duration = Duration::from_secs(10);
 const RESERVED_FOLDERS: [&str; 2] = ["assets", "files"];
 const FALLBACK_FOLDER: &str = "board";
+const MACOS_COMPANION_PREFIX: &str = "._";
 
 #[must_use]
 pub fn is_board_folder(folder: &Path) -> bool {
@@ -165,8 +166,10 @@ fn holds_only_locks(folder: &Path) -> Result<bool, Error> {
         Err(error) if error.kind() == ErrorKind::NotADirectory => return Ok(false),
         Err(error) => return Err(io_failure(folder)(error)),
     };
+    let companion_of_the_locks = format!("{MACOS_COMPANION_PREFIX}{LOCKS_FOLDER}");
     for entry in entries {
-        if entry.map_err(io_failure(folder))?.file_name() != LOCKS_FOLDER {
+        let name = entry.map_err(io_failure(folder))?.file_name();
+        if name != LOCKS_FOLDER && name.to_str() != Some(companion_of_the_locks.as_str()) {
             return Ok(false);
         }
     }

@@ -4,9 +4,11 @@ use std::fs::{self, File};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
+use std::time::Duration;
 
 use common::{Scratch, add_note, add_section, append, set_body, set_title};
 use wb_core::Workspace;
+use wb_core::lock::{BoardLocks, LockKey};
 use wb_model::{CONFIG_FILE, Error, NoteDraft, Op, Outcome};
 
 const IMAGE_SIZE: &str = "64m";
@@ -14,6 +16,7 @@ const VOLUME_NAME: &str = "GARDEN";
 const ROOM_LEFT: usize = 256 * 1024;
 const FILLER_CHUNK: usize = 1024 * 1024;
 const TOO_BIG_FOR_THE_ROOM_LEFT: usize = 2 * 1024 * 1024;
+const NO_WAIT: Duration = Duration::ZERO;
 
 struct Mounted {
     device: String,
@@ -107,6 +110,41 @@ fn fill_all_but_a_little_room(volume: &Path) {
     fs::remove_file(room).expect("room freed");
 }
 
+fn names_in(folder: &Path) -> Vec<String> {
+    let mut names: Vec<String> = fs::read_dir(folder)
+        .expect("folder")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    names.sort();
+    names
+}
+
+fn a_board_whose_creation_was_cut_short_is_taken_again(file_system: &str, root: &Path) {
+    let workspace = Workspace::open(root).expect("workspace");
+    let folder = root.join("kitchen");
+    fs::create_dir(&folder).expect("board folder");
+    drop(
+        BoardLocks::of_board(&folder)
+            .acquire(&[LockKey::Config], NO_WAIT)
+            .expect("config lock"),
+    );
+    let left = names_in(&folder);
+
+    let kitchen = workspace.add_board("Kitchen", None);
+
+    assert_eq!(
+        kitchen.map(|board| board.id.to_string()),
+        Ok("kitchen".to_owned()),
+        "{file_system}: a folder holding {left:?} after a creation cut short was not taken again"
+    );
+}
+
 fn a_board_keeps_exactly_what_was_written(file_system: &str) {
     let scratch = Scratch::new(&format!("volume-{}", file_system.replace(' ', "-")));
     let mounted = mount(scratch.path(), file_system);
@@ -158,6 +196,7 @@ fn a_board_keeps_exactly_what_was_written(file_system: &str) {
     );
     let notes = board.notes().expect("notes");
     assert_eq!(notes.len(), 1, "{file_system}: the board holds {notes:?}");
+    a_board_whose_creation_was_cut_short_is_taken_again(file_system, &root);
 
     fill_all_but_a_little_room(&mounted.point);
     let big = board.apply(Op::AddNote {
