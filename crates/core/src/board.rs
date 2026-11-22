@@ -4,10 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use wb_model::{
-    BOARD_FILE, BoardFile, BoardId, BoardInfo, BoardSnapshot, DraftSection, Error, Invalid, Note,
-    NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, Placement, SectionId, SectionNode,
-    SectionRef, SectionTree, Tag, clean_body, clean_title, edit_note, file_name, parse, render,
-    text,
+    BOARD_FILE, BoardConfig, BoardFile, BoardId, BoardInfo, BoardSnapshot, DraftSection, Error,
+    Invalid, Note, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, Placement,
+    SectionId, SectionNode, SectionRef, SectionTree, Tag, clean_body, clean_title, edit_note,
+    file_name, parse, render, text,
 };
 
 use crate::failure::{io_failure, kept_changing, lock_failure, malformed, not_a_plain_file};
@@ -54,15 +54,23 @@ impl Board {
         &self.id
     }
 
+    pub fn info(&self) -> Result<BoardInfo, Error> {
+        Ok(BoardInfo {
+            id: self.id.clone(),
+            name: read_board_file(&self.folder)?.name,
+        })
+    }
+
+    pub fn config(&self) -> Result<BoardConfig, Error> {
+        config::read(&self.folder)
+    }
+
     pub fn snapshot(&self) -> Result<BoardSnapshot, Error> {
-        let name = read_board_file(&self.folder)?.name;
+        let board = self.info()?;
         let sections = self.sections()?;
         let scan = folder::scan(&self.folder)?;
         Ok(BoardSnapshot {
-            board: BoardInfo {
-                id: self.id.clone(),
-                name,
-            },
+            board,
             sections: sections.nodes(),
             notes: scan
                 .notes
@@ -116,7 +124,7 @@ impl Board {
     }
 
     fn sections(&self) -> Result<SectionTree, Error> {
-        Ok(SectionTree::from_config(&config::read(&self.folder)?))
+        Ok(SectionTree::from_config(&self.config()?))
     }
 
     pub(crate) fn find(&self, id: &NoteId) -> Result<Found, Error> {

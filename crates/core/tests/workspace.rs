@@ -459,3 +459,48 @@ fn a_board_whose_creation_was_cut_short_is_no_board_and_its_name_is_free_again()
         .collect();
     assert_eq!(left, ["board.config.lock"]);
 }
+
+#[test]
+fn a_board_gives_its_name_and_config_as_a_snapshot_reads_them_and_writes_nothing() {
+    let scratch = Scratch::new("name-and-config");
+    let board = scratch.garden();
+    let config = scratch.path().join("garden").join(wb_model::CONFIG_FILE);
+
+    assert_eq!(board.info().expect("info").name, "Garden");
+    assert_eq!(
+        board.config().expect("config"),
+        wb_model::BoardConfig::default()
+    );
+    fs::write(&config, " \n").expect("blank config");
+    assert_eq!(
+        board.config().expect("config"),
+        wb_model::BoardConfig::default()
+    );
+
+    board.apply(add_section("Beds")).expect("section");
+    fs::write(
+        scratch.path().join("garden/board.json"),
+        "{\"version\":2,\"name\":\"Kitchen garden\"}\n",
+    )
+    .expect("board file renamed by another program");
+    let before = tree_bytes(scratch.path());
+
+    let info = board.info().expect("info");
+    let read = board.config().expect("config");
+    assert_eq!(
+        (info.id.as_str(), info.name.as_str()),
+        ("garden", "Kitchen garden")
+    );
+    assert_eq!(read.section_entries()[0].name, "Beds");
+    let snapshot = board.snapshot().expect("snapshot");
+    assert_eq!(snapshot.board, info);
+    assert_eq!(
+        snapshot.sections,
+        wb_model::SectionTree::from_config(&read).nodes()
+    );
+    assert_eq!(
+        tree_bytes(scratch.path()),
+        before,
+        "reading the name or the config wrote a file"
+    );
+}
