@@ -28,7 +28,15 @@ export type PageBoard = {
   readonly cards: readonly PageCard[];
 };
 
-export function readBoard(app: RunningApp): Promise<PageBoard> {
+async function layoutSettled(app: RunningApp): Promise<void> {
+  await app.waitFor(
+    () => document.querySelector(".world")?.getAttribute("data-layout") === "settled",
+    { timeout: 5_000 },
+  );
+}
+
+export async function readBoard(app: RunningApp): Promise<PageBoard> {
+  await layoutSettled(app);
   return app.evaluate(() => {
     const box = (element: Element) => {
       const rect = element.getBoundingClientRect();
@@ -64,6 +72,7 @@ export function inside(outer: Box, inner: Box): boolean {
 }
 
 export async function centreOf(app: RunningApp, selector: string): Promise<Point> {
+  await layoutSettled(app);
   const point = await app.evaluate((wanted) => {
     const element = document.querySelector(wanted);
     if (element === null) {
