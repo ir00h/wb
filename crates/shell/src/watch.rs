@@ -21,6 +21,12 @@ pub trait Publish: Send + Sync + 'static {
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Fingerprint(Option<Vec<(OsString, u64, Option<SystemTime>)>>);
 
+#[derive(Clone, Copy)]
+enum Cause {
+    Reported,
+    Recheck,
+}
+
 struct Watched {
     board: Board,
     folder: PathBuf,
@@ -151,25 +157,26 @@ fn settle(signals: &Receiver<()>) -> Result<(), RecvTimeoutError> {
 
 fn follow(signals: &Receiver<()>, watched: &Mutex<Option<Watched>>, publisher: &impl Publish) {
     loop {
-        match signals.recv_timeout(RECHECK) {
+        let cause = match signals.recv_timeout(RECHECK) {
             Ok(()) => {
                 if settle(signals).is_err() {
                     return;
                 }
+                Cause::Reported
             }
-            Err(RecvTimeoutError::Timeout) => {}
+            Err(RecvTimeoutError::Timeout) => Cause::Recheck,
             Err(RecvTimeoutError::Disconnected) => return,
-        }
+        };
         let mut watched = watched.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(watched) = watched.as_mut() {
-            refresh(watched, publisher);
+            refresh(watched, cause, publisher);
         }
     }
 }
 
-fn refresh(watched: &mut Watched, publisher: &impl Publish) {
+fn refresh(watched: &mut Watched, cause: Cause, publisher: &impl Publish) {
     let seen = fingerprint(&watched.folder);
-    if seen == watched.seen && watched.problem.is_none() {
+    if matches!(cause, Cause::Recheck) && seen == watched.seen && watched.problem.is_none() {
         return;
     }
     watched.seen = seen;

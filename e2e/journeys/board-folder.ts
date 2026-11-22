@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { cp, link, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { cp, link, readdir, readFile, rename, rm, utimes, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { cardsShown, eventually, launchGarden } from "../board-page.ts";
 import type { Journey, RunningApp } from "../driver.ts";
@@ -8,6 +8,9 @@ import { addNote, BOARD } from "../garden.ts";
 const RECHECK_WAIT_MS = 5_000;
 const EVENT_WAIT_MS = 1_500;
 const BUSY_WRITE_MS = 60;
+const FIXED_TIME = new Date("2026-04-01T08:00:00Z");
+const UNTICKED = "Round one: [ ] water the beds.";
+const TICKED = "Round one: [x] water the beds.";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -63,6 +66,28 @@ export const boardFolder: Journey = {
         RECHECK_WAIT_MS,
       ),
       "a change the watcher did not report was not caught by the recheck",
+    );
+
+    const plantPath = join(board, plantFile);
+    const saveKeepingTime = async (from: string, to: string) => {
+      await writeFile(plantPath, (await readFile(plantPath, "utf8")).replace(from, to));
+      await utimes(plantPath, FIXED_TIME, FIXED_TIME);
+    };
+    await saveKeepingTime("Changed through another name of the file.", UNTICKED);
+    assert.ok(
+      await eventually(
+        async () => (await cardBody(app, garden.notes.plants)) === UNTICKED,
+        EVENT_WAIT_MS,
+      ),
+      "a save with the modification time set back was not shown",
+    );
+    await saveKeepingTime(UNTICKED, TICKED);
+    assert.ok(
+      await eventually(
+        async () => (await cardBody(app, garden.notes.plants)) === TICKED,
+        EVENT_WAIT_MS,
+      ),
+      "a second save of the same size and modification time was not shown",
     );
 
     let busy = true;
