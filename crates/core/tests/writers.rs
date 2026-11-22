@@ -8,11 +8,11 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use common::{
-    ROLE, Scratch, add_note, add_section, append, files_holding, open_board, set_body, set_title,
-    setting, spawn_role, wait_for,
+    ROLE, Scratch, add_note, add_section, append, every_test_passes_again_without_an_exchange,
+    files_holding, open_board, open_workspace, set_body, set_title, setting, spawn_role, wait_for,
 };
+use wb_core::TRASH_FOLDER;
 use wb_core::lock::{BoardLocks, LockError, LockKey};
-use wb_core::{TRASH_FOLDER, Workspace};
 use wb_model::{BoardConfig, CONFIG_FILE, Error, NoteId, Op, Outcome, SectionId};
 
 const WRITERS: usize = 20;
@@ -351,8 +351,7 @@ fn a_writer_waits_for_a_stalled_holder_and_both_changes_are_kept() {
     let stalled = stall_inside_a_config_change(&scratch.path().join(GARDEN));
 
     thread::sleep(ARRIVAL);
-    let writer = Workspace::open(scratch.path())
-        .expect("workspace")
+    let writer = open_workspace(scratch.path())
         .with_lock_deadline(LONG_DEADLINE)
         .board(&GARDEN.parse().expect("board id"))
         .expect("board");
@@ -380,8 +379,7 @@ fn a_writer_with_a_short_deadline_gives_up_and_changes_nothing() {
     let stalled = stall_inside_a_config_change(&scratch.path().join(GARDEN));
 
     thread::sleep(ARRIVAL);
-    let writer = Workspace::open(scratch.path())
-        .expect("workspace")
+    let writer = open_workspace(scratch.path())
         .with_lock_deadline(SHORT_DEADLINE)
         .board(&GARDEN.parse().expect("board id"))
         .expect("board");
@@ -667,8 +665,7 @@ fn a_lock_still_keeps_writers_out_after_its_holder_replaced_and_renamed_the_file
     let config_text = fs::read_to_string(&config).expect("config");
     replace_by_rename(&config, &config_text);
 
-    let writer = Workspace::open(scratch.path())
-        .expect("workspace")
+    let writer = open_workspace(scratch.path())
         .with_lock_deadline(HELD_DEADLINE)
         .board(&GARDEN.parse().expect("board id"))
         .expect("board");
@@ -684,4 +681,9 @@ fn a_lock_still_keeps_writers_out_after_its_holder_replaced_and_renamed_the_file
         matches!(config_answer, Err(Error::Busy { .. })),
         "a writer got into the config whose lock was held, after the holder replaced the file: {config_answer:?}"
     );
+}
+
+#[test]
+fn every_sequence_also_holds_on_a_volume_without_an_exchange() {
+    every_test_passes_again_without_an_exchange();
 }

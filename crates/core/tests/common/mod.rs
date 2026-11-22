@@ -8,15 +8,51 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use wb_core::{Board, Workspace};
+use wb_core::{Board, Volume, Workspace};
 use wb_model::{
     BodyChange, Change, NoteCard, NoteDraft, NoteEdit, NoteId, Op, Outcome, Parsed, parse,
 };
 
 pub const ROLE: &str = "WB_TEST_ROLE";
+const VOLUME: &str = "WB_TEST_VOLUME";
 const PATIENCE: Duration = Duration::from_secs(30);
 
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
+
+fn volume_under_test() -> Option<Volume> {
+    match std::env::var(VOLUME).as_deref() {
+        Err(_) => None,
+        Ok("without-exchange") => Some(Volume::WITHOUT_EXCHANGE),
+        Ok(other) => panic!("no volume called {other}"),
+    }
+}
+
+pub fn open_workspace(root: &Path) -> Workspace {
+    let workspace = Workspace::open(root).expect("workspace");
+    match volume_under_test() {
+        Some(volume) => workspace.assuming_volume(volume),
+        None => workspace,
+    }
+}
+
+pub fn every_test_passes_again_without_an_exchange() {
+    if std::env::var_os(VOLUME).is_some() {
+        return;
+    }
+    let run = Command::new(std::env::current_exe().expect("test binary"))
+        .env(VOLUME, "without-exchange")
+        .output()
+        .expect("test run");
+    let said = String::from_utf8_lossy(&run.stdout);
+    assert!(
+        run.status.success(),
+        "on a volume without an exchange these tests failed:\n{}",
+        said.lines()
+            .filter(|line| line.contains("FAILED") || line.contains("panicked"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
 
 pub struct Scratch {
     path: PathBuf,
@@ -37,7 +73,7 @@ impl Scratch {
     }
 
     pub fn workspace(&self) -> Workspace {
-        Workspace::open(&self.path).expect("workspace")
+        open_workspace(&self.path)
     }
 
     pub fn garden(&self) -> Board {
@@ -55,10 +91,7 @@ impl Drop for Scratch {
 
 pub fn open_board(workspace: &Path, board: &str) -> Board {
     let id = board.parse().expect("board id");
-    Workspace::open(workspace)
-        .expect("workspace")
-        .board(&id)
-        .expect("board handle")
+    open_workspace(workspace).board(&id).expect("board handle")
 }
 
 pub fn add_note(board: &Board, title: &str, body: &str) -> NoteCard {

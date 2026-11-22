@@ -246,3 +246,8 @@ fn a_note_in_a_file_named_for_another_id_is_found_by_the_id_inside_it() {
         Err(wb_model::Error::NoteNotFound { .. })
     ));
 }
+
+#[test]
+fn every_outside_writer_is_also_seen_on_a_volume_without_an_exchange() {
+    common::every_test_passes_again_without_an_exchange();
+}

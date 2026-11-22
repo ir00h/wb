@@ -40,11 +40,11 @@ pub struct Board {
 }
 
 impl Board {
-    pub(crate) fn at(id: BoardId, folder: PathBuf, lock_deadline: Duration) -> Board {
+    pub(crate) fn at(id: BoardId, locks: BoardLocks, lock_deadline: Duration) -> Board {
         Board {
             id,
-            locks: BoardLocks::of_board(&folder),
-            folder,
+            folder: locks.board().to_path_buf(),
+            locks,
             lock_deadline,
         }
     }

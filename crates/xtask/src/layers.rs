@@ -32,7 +32,7 @@ const LAYERS: &[Layer] = &[
         pure: false,
         normal: &["rustix", "serde_json", "thiserror", "wb-model"],
         build: &[],
-        dev: &[],
+        dev: &["wb-core"],
     },
     Layer {
         package: "wb",

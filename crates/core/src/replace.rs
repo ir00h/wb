@@ -2,14 +2,16 @@ use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
-use wb_model::{CONFIG_FILE, NoteId};
+use wb_model::{BOARD_FILE, CONFIG_FILE, NoteId};
 
 use crate::lock::{Held, LockKey};
+use crate::volume::{Creation, Replacement, Volume, platform};
 
 const EXCHANGES: usize = 8;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Target<'a> {
+    BoardFile,
     Config,
     Note { id: &'a NoteId, name: &'a str },
 }
@@ -17,13 +19,14 @@ pub enum Target<'a> {
 impl Target<'_> {
     fn key(&self) -> LockKey {
         match self {
-            Target::Config => LockKey::Config,
+            Target::BoardFile | Target::Config => LockKey::Config,
             Target::Note { id, .. } => LockKey::Note((*id).clone()),
         }
     }
 
     fn path(&self, board: &Path) -> PathBuf {
         match self {
+            Target::BoardFile => board.join(BOARD_FILE),
             Target::Config => board.join(CONFIG_FILE),
             Target::Note { name, .. } => board.join(name),
         }
@@ -58,7 +61,7 @@ pub fn replace_if_unchanged(
 ) -> io::Result<Replaced> {
     let temporary = held.temporary_file(&target.key())?;
     let path = target.path(held.board());
-    let replaced = exchange_unless_changed(&temporary, &path, read, new);
+    let replaced = replace_unless_changed(held.volume(), &temporary, &path, read, new);
     let _ = fs::remove_file(&temporary);
     if matches!(replaced, Ok(Replaced::Done)) {
         sync_folder_of(&path);
@@ -68,21 +71,35 @@ pub fn replace_if_unchanged(
 
 pub fn create_new(held: &Held, target: Target, new: &[u8]) -> io::Result<Created> {
     let temporary = held.temporary_file(&target.key())?;
-    create_through(&temporary, &target.path(held.board()), new)
-}
-
-pub fn create_in_a_folder_made_for_it(path: &Path, new: &[u8]) -> io::Result<Created> {
-    let name = path
-        .file_name()
-        .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    create_through(&path.with_file_name(format!(".{name}.tmp")), path, new)
+    let path = target.path(held.board());
+    let created = match held.volume().creation {
+        Creation::RenameWithoutReplacing => write_temporary(&temporary, new, None)
+            .and_then(|()| platform::rename_without_replacing(&temporary, &path)),
+        Creation::HardLink => {
+            write_temporary(&temporary, new, None).and_then(|()| fs::hard_link(&temporary, &path))
+        }
+        Creation::CreateNew => write_in_place(&path, new),
+    };
+    let _ = fs::remove_file(&temporary);
+    match created {
+        Ok(()) => {
+            sync_folder_of(&path);
+            Ok(Created::Done)
+        }
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => Ok(Created::Exists),
+        Err(error) => Err(error),
+    }
 }
 
 pub fn rename_note(held: &Held, id: &NoteId, from: &str, to: &str) -> io::Result<Renamed> {
     held.temporary_file(&LockKey::Note(id.clone()))?;
     let (from, to) = (held.board().join(from), held.board().join(to));
-    match platform::rename_unless_taken(&from, &to) {
+    let renamed = match held.volume().creation {
+        Creation::RenameWithoutReplacing => platform::rename_without_replacing(&from, &to),
+        Creation::HardLink => fs::hard_link(&from, &to).and_then(|()| fs::remove_file(&from)),
+        Creation::CreateNew => rename_after_a_look(&from, &to),
+    };
+    match renamed {
         Ok(()) => {
             sync_folder_of(&to);
             Ok(Renamed::Done)
@@ -93,26 +110,33 @@ pub fn rename_note(held: &Held, id: &NoteId, from: &str, to: &str) -> io::Result
     }
 }
 
-fn create_through(temporary: &Path, path: &Path, new: &[u8]) -> io::Result<Created> {
-    let created = write_temporary(temporary, new, None)
-        .and_then(|()| platform::rename_unless_taken(temporary, path));
-    match created {
-        Ok(()) => {
-            sync_folder_of(path);
-            Ok(Created::Done)
-        }
-        Err(error) => {
-            let _ = fs::remove_file(temporary);
-            if error.kind() == ErrorKind::AlreadyExists {
-                Ok(Created::Exists)
-            } else {
-                Err(error)
-            }
-        }
+fn rename_after_a_look(from: &Path, to: &Path) -> io::Result<()> {
+    if to.try_exists()? {
+        return Err(ErrorKind::AlreadyExists.into());
+    }
+    fs::rename(from, to)
+}
+
+fn write_in_place(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+    let written = file.write_all(bytes).and_then(|()| file.sync_all());
+    if written.is_err() {
+        let _ = fs::remove_file(path);
+    }
+    written
+}
+
+fn look(path: &Path, read: &[u8]) -> io::Result<Option<Replaced>> {
+    match fs::read(path) {
+        Ok(on_disk) if on_disk == read => Ok(None),
+        Ok(on_disk) => Ok(Some(Replaced::Changed { now: on_disk })),
+        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Some(Replaced::Gone)),
+        Err(error) => Err(error),
     }
 }
 
-fn exchange_unless_changed(
+fn replace_unless_changed(
+    volume: Volume,
     temporary: &Path,
     path: &Path,
     read: &[u8],
@@ -124,20 +148,23 @@ fn exchange_unless_changed(
         Err(error) => return Err(error),
     };
     write_temporary(temporary, new, Some(permissions))?;
-    match fs::read(path) {
-        Ok(on_disk) if on_disk == read => {}
-        Ok(on_disk) => return Ok(Replaced::Changed { now: on_disk }),
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
-        Err(error) => return Err(error),
+    #[cfg(test)]
+    hook::run(hook::Moment::BeforeTheLastLook, path);
+    if let Some(stop) = look(path, read)? {
+        return Ok(stop);
     }
     #[cfg(test)]
-    hook::run(path);
+    hook::run(hook::Moment::AfterTheLastLook, path);
+    match volume.replacement {
+        Replacement::Exchange => exchange(temporary, path, read, new),
+        Replacement::RenameAfterALastLook => fs::rename(temporary, path).map(|()| Replaced::Done),
+    }
+}
+
+fn exchange(temporary: &Path, path: &Path, read: &[u8], new: &[u8]) -> io::Result<Replaced> {
     match platform::exchange(temporary, path) {
         Ok(()) => {}
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Replaced::Gone),
-        Err(error) if platform::cannot_exchange(&error) => {
-            return rename_after_a_last_look(temporary, path, read);
-        }
         Err(error) => return Err(error),
     }
     let mut put = new.to_vec();
@@ -160,15 +187,6 @@ fn exchange_unless_changed(
     Err(io::Error::other(
         "another program kept writing the file while it was being replaced",
     ))
-}
-
-fn rename_after_a_last_look(temporary: &Path, path: &Path, read: &[u8]) -> io::Result<Replaced> {
-    match fs::read(path) {
-        Ok(now) if now == read => fs::rename(temporary, path).map(|()| Replaced::Done),
-        Ok(now) => Ok(Replaced::Changed { now }),
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(Replaced::Gone),
-        Err(error) => Err(error),
-    }
 }
 
 fn write_temporary(
@@ -196,58 +214,6 @@ fn sync_folder_of(path: &Path) {
     }
 }
 
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-mod platform {
-    use std::io::{self, ErrorKind};
-    use std::path::Path;
-
-    use rustix::fs::{CWD, RenameFlags, renameat_with};
-
-    pub fn exchange(one: &Path, other: &Path) -> io::Result<()> {
-        Ok(renameat_with(CWD, one, CWD, other, RenameFlags::EXCHANGE)?)
-    }
-
-    pub fn cannot_exchange(error: &io::Error) -> bool {
-        matches!(
-            error.kind(),
-            ErrorKind::Unsupported | ErrorKind::InvalidInput
-        )
-    }
-
-    pub fn rename_unless_taken(from: &Path, to: &Path) -> io::Result<()> {
-        match renameat_with(CWD, from, CWD, to, RenameFlags::NOREPLACE) {
-            Ok(()) => Ok(()),
-            Err(error) if cannot_exchange(&error.into()) => super::rename_after_a_look(from, to),
-            Err(error) => Err(error.into()),
-        }
-    }
-}
-
-#[cfg(not(any(target_os = "macos", target_os = "linux")))]
-mod platform {
-    use std::io::{self, ErrorKind};
-    use std::path::Path;
-
-    pub fn exchange(_one: &Path, _other: &Path) -> io::Result<()> {
-        Err(ErrorKind::Unsupported.into())
-    }
-
-    pub fn cannot_exchange(error: &io::Error) -> bool {
-        error.kind() == ErrorKind::Unsupported
-    }
-
-    pub fn rename_unless_taken(from: &Path, to: &Path) -> io::Result<()> {
-        super::rename_after_a_look(from, to)
-    }
-}
-
-fn rename_after_a_look(from: &Path, to: &Path) -> io::Result<()> {
-    if to.try_exists()? {
-        return Err(ErrorKind::AlreadyExists.into());
-    }
-    fs::rename(from, to)
-}
-
 #[cfg(test)]
 pub mod hook {
     use std::cell::RefCell;
@@ -255,17 +221,36 @@ pub mod hook {
 
     type Action = Box<dyn FnOnce(&Path)>;
 
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub enum Moment {
+        BeforeTheLastLook,
+        AfterTheLastLook,
+    }
+
     thread_local! {
-        static BEFORE_THE_EXCHANGE: RefCell<Option<Action>> = const { RefCell::new(None) };
+        static NEXT: RefCell<Option<(Moment, Action)>> = const { RefCell::new(None) };
+    }
+
+    pub fn at_the_next(moment: Moment, action: impl FnOnce(&Path) + 'static) {
+        NEXT.with(|hook| *hook.borrow_mut() = Some((moment, Box::new(action))));
     }
 
     pub fn before_the_next_exchange(action: impl FnOnce(&Path) + 'static) {
-        BEFORE_THE_EXCHANGE.with(|hook| *hook.borrow_mut() = Some(Box::new(action)));
+        at_the_next(Moment::AfterTheLastLook, action);
     }
 
-    pub(super) fn run(path: &Path) {
-        let action = BEFORE_THE_EXCHANGE.with(|hook| hook.borrow_mut().take());
-        if let Some(action) = action {
+    pub(super) fn run(now: Moment, path: &Path) {
+        let due = NEXT.with(|hook| {
+            let mut hook = hook.borrow_mut();
+            match hook.take() {
+                Some((moment, action)) if moment == now => Some(action),
+                other => {
+                    *hook = other;
+                    None
+                }
+            }
+        });
+        if let Some(action) = due {
             action(path);
         }
     }

@@ -409,5 +409,5 @@ fn an_edit_of_an_id_no_file_holds_leaves_nothing_behind() {
         before.keys().collect::<Vec<_>>(),
         "the edit of an unknown id left files behind"
     );
-    assert!(!scratch.path().join("garden/.locks").exists());
+    assert!(!scratch.path().join("garden/.locks/n99.lock").exists());
 }

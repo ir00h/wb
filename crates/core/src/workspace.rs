@@ -6,8 +6,10 @@ use std::time::Duration;
 use wb_model::{BOARD_FILE, BoardFile, BoardId, BoardInfo, Error, Invalid, slug, text};
 
 use crate::board::{Board, read_board_file};
-use crate::failure::{io_failure, malformed};
-use crate::replace::create_in_a_folder_made_for_it;
+use crate::failure::{io_failure, lock_failure, malformed};
+use crate::lock::{BoardLocks, LockKey};
+use crate::replace::{Target, create_new};
+use crate::volume::Volume;
 
 pub const DEFAULT_LOCK_DEADLINE: Duration = Duration::from_secs(10);
 const RESERVED_FOLDERS: [&str; 2] = ["assets", "files"];
@@ -22,6 +24,7 @@ pub fn is_board_folder(folder: &Path) -> bool {
 pub struct Workspace {
     root: PathBuf,
     lock_deadline: Duration,
+    volume: Option<Volume>,
 }
 
 impl Workspace {
@@ -34,6 +37,7 @@ impl Workspace {
         Ok(Workspace {
             root: root.to_path_buf(),
             lock_deadline: DEFAULT_LOCK_DEADLINE,
+            volume: None,
         })
     }
 
@@ -41,6 +45,15 @@ impl Workspace {
     pub fn with_lock_deadline(self, lock_deadline: Duration) -> Workspace {
         Workspace {
             lock_deadline,
+            ..self
+        }
+    }
+
+    #[cfg(any(test, feature = "volume-seam"))]
+    #[must_use]
+    pub fn assuming_volume(self, volume: Volume) -> Workspace {
+        Workspace {
+            volume: Some(volume),
             ..self
         }
     }
@@ -61,7 +74,11 @@ impl Workspace {
         if !is_board_folder(&folder) {
             return Err(Error::BoardNotFound { board: id.clone() });
         }
-        Ok(Board::at(id.clone(), folder, self.lock_deadline))
+        Ok(Board::at(
+            id.clone(),
+            BoardLocks::on_volume(&folder, self.volume),
+            self.lock_deadline,
+        ))
     }
 
     pub fn add_board(&self, name: &str, parent: Option<&BoardId>) -> Result<BoardInfo, Error> {
@@ -81,7 +98,10 @@ impl Workspace {
         let (folder_name, folder) = create_free_folder(&parent_folder, &name)?;
         let path = folder.join(BOARD_FILE);
         let text = BoardFile::new(&name).render().map_err(malformed(&path))?;
-        create_in_a_folder_made_for_it(&path, text.as_bytes()).map_err(io_failure(&path))?;
+        let held = BoardLocks::on_volume(&folder, self.volume)
+            .acquire(&[LockKey::Config], self.lock_deadline)
+            .map_err(lock_failure(&folder, "the new board"))?;
+        create_new(&held, Target::BoardFile, text.as_bytes()).map_err(io_failure(&path))?;
         let id = child_id(parent, &folder_name).ok_or_else(|| Error::Io {
             path: folder.display().to_string(),
             message: "the new folder name is not a board id".to_owned(),

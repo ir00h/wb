@@ -4613,6 +4613,7 @@ dependencies = [
  "rustix",
  "serde_json",
  "thiserror 2.0.21",
+ "wb-core",
  "wb-model",
 ]
 

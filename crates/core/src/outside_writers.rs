@@ -9,15 +9,38 @@ use wb_model::{
 };
 
 use crate::lock::{BoardLocks, LOCKS_FOLDER, LockKey};
-use crate::replace::{
-    Created, Replaced, Target, create_new, hook::before_the_next_exchange, replace_if_unchanged,
-};
-use crate::{Board, TRASH_FOLDER, Workspace};
+use crate::replace::hook::{Moment, at_the_next, before_the_next_exchange};
+use crate::replace::{Created, Replaced, Target, create_new, replace_if_unchanged};
+use crate::{Board, Replacement, TRASH_FOLDER, Volume, Workspace};
 
+const VOLUME: &str = "WB_TEST_VOLUME";
 const KILLED_WRITER: &str = "WB_TEST_KILLED_WRITER";
 const KILLED_WRITER_NOTE: &str = "WB_TEST_KILLED_WRITER_NOTE";
 static SCRATCH_FOLDERS: AtomicU32 = AtomicU32::new(0);
 const AT_ONCE: Duration = Duration::from_millis(50);
+
+fn volume_under_test() -> Option<Volume> {
+    match std::env::var(VOLUME).as_deref() {
+        Err(_) => None,
+        Ok("without-exchange") => Some(Volume::WITHOUT_EXCHANGE),
+        Ok("hard-links-only") => Some(Volume::WITH_HARD_LINKS_ONLY),
+        Ok(other) => panic!("no volume called {other}"),
+    }
+}
+
+fn locks_of(board: &Path) -> BoardLocks {
+    BoardLocks::on_volume(board, volume_under_test())
+}
+
+fn when_the_core_can_still_see_it(action: impl FnOnce(&Path) + 'static) {
+    let moment = match volume_under_test() {
+        Some(volume) if volume.replacement == Replacement::RenameAfterALastLook => {
+            Moment::BeforeTheLastLook
+        }
+        _ => Moment::AfterTheLastLook,
+    };
+    at_the_next(moment, action);
+}
 
 struct Garden {
     root: PathBuf,
@@ -33,7 +56,10 @@ impl Garden {
         ));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(&root).expect("scratch folder");
-        let workspace = Workspace::open(&root).expect("workspace");
+        let mut workspace = Workspace::open(&root).expect("workspace");
+        if let Some(volume) = volume_under_test() {
+            workspace = workspace.assuming_volume(volume);
+        }
         let garden = workspace.add_board("Garden", None).expect("board");
         let board = workspace.board(&garden.id).expect("board handle");
         Garden { root, board }
@@ -122,7 +148,7 @@ fn a_note_trashed_between_the_read_and_the_write_stays_in_the_trash() {
     let file = garden.file_of(&note);
     let before = fs::read(&file).expect("note file");
 
-    before_the_next_exchange(|file| {
+    when_the_core_can_still_see_it(|file| {
         move_to_the_trash(file);
     });
     let answer = garden.board.apply(append(&note.id, "After the rain."));
@@ -156,7 +182,9 @@ fn an_append_keeps_text_another_program_wrote_between_the_read_and_the_write() {
         .replace("Monday: peas.", "Monday: peas and beans.");
 
     let written_outside = outside.clone();
-    before_the_next_exchange(move |file| fs::write(file, written_outside).expect("outside edit"));
+    when_the_core_can_still_see_it(move |file| {
+        fs::write(file, written_outside).expect("outside edit");
+    });
     let answer = garden.board.apply(append(&note.id, "Tuesday: kale."));
 
     let now = fs::read_to_string(&file).expect("note file");
@@ -182,7 +210,9 @@ fn an_edit_with_a_base_is_a_conflict_when_another_program_wrote_between_the_read
         .replace("Six plants.", "Eight plants.");
 
     let written_outside = outside.clone();
-    before_the_next_exchange(move |file| fs::write(file, written_outside).expect("outside edit"));
+    when_the_core_can_still_see_it(move |file| {
+        fs::write(file, written_outside).expect("outside edit");
+    });
     let answer = garden
         .board
         .apply(set_body(&note.id, "Six plants.", "Six plants and basil."));
@@ -204,7 +234,7 @@ fn a_section_is_added_to_the_config_another_program_saved_between_the_read_and_t
     let config = garden.folder().join(CONFIG_FILE);
     fs::write(&config, "{\n  \"version\": 1\n}\n").expect("config");
 
-    before_the_next_exchange(|config| {
+    when_the_core_can_still_see_it(|config| {
         fs::write(config, "{\n  \"version\": 1,\n  \"theme\": \"meadow\"\n}\n")
             .expect("outside save");
     });
@@ -231,7 +261,7 @@ fn a_file_is_not_written_under_a_lock_for_something_else() {
     let note = garden.add_note("Plant list", "Tomatoes");
     let config = garden.folder().join(CONFIG_FILE);
     fs::write(&config, "{}\n").expect("config");
-    let held = BoardLocks::of_board(&garden.folder())
+    let held = locks_of(&garden.folder())
         .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
         .expect("note lock");
 
@@ -259,7 +289,7 @@ fn a_new_file_never_replaces_one_that_is_there() {
         .to_string_lossy()
         .into_owned();
     let before = fs::read(&file).expect("note file");
-    let held = BoardLocks::of_board(&garden.folder())
+    let held = locks_of(&garden.folder())
         .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
         .expect("note lock");
     let target = Target::Note {
@@ -362,7 +392,7 @@ fn taking_a_lock_removes_what_a_killed_holder_of_that_lock_left() {
     }
 
     drop(
-        BoardLocks::of_board(&garden.folder())
+        locks_of(&garden.folder())
             .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
             .expect("note lock"),
     );
@@ -374,7 +404,7 @@ fn taking_a_lock_removes_what_a_killed_holder_of_that_lock_left() {
         ]
     );
     drop(
-        BoardLocks::of_board(&garden.folder())
+        locks_of(&garden.folder())
             .acquire(&[LockKey::Config], AT_ONCE)
             .expect("config lock"),
     );
@@ -394,7 +424,7 @@ fn a_file_that_changed_before_the_exchange_is_never_exchanged() {
         .expect("name")
         .to_string_lossy()
         .into_owned();
-    let held = BoardLocks::of_board(&garden.folder())
+    let held = locks_of(&garden.folder())
         .acquire(&[LockKey::Note(note.id.clone())], AT_ONCE)
         .expect("note lock");
     let target = Target::Note {
@@ -417,4 +447,32 @@ fn a_file_that_changed_before_the_exchange_is_never_exchanged() {
         fs::read(&file).expect("note file"),
         b"written by another program"
     );
+}
+
+#[test]
+fn every_test_of_outside_writers_passes_on_volumes_without_an_exchange() {
+    if std::env::var_os(VOLUME).is_some() {
+        return;
+    }
+    for volume in ["without-exchange", "hard-links-only"] {
+        let run = Command::new(std::env::current_exe().expect("test binary"))
+            .args(["outside_writers::", "--test-threads=1"])
+            .env(VOLUME, volume)
+            .output()
+            .expect("test run");
+        let said = String::from_utf8_lossy(&run.stdout);
+        assert!(
+            run.status.success(),
+            "on a volume {volume} these tests failed:\n{}",
+            said.lines()
+                .filter(|line| line.contains("FAILED") || line.contains("panicked"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert!(
+            said.contains(
+                "test outside_writers::a_new_file_never_replaces_one_that_is_there ... ok"
+            )
+        );
+    }
 }
