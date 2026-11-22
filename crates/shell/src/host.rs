@@ -69,11 +69,14 @@ impl Handler for Host {
     fn apply(&self, args: ApplyOp) -> Result<Outcome, Error> {
         let _in_flight = self.closing.operation();
         #[cfg(feature = "automation")]
-        let applied = crate::automation::Applied::of(&args.op);
-        let outcome = self.workspace.board(&args.board)?.apply(args.op)?;
+        let operation = crate::automation::Operation::of(&args.op);
+        let outcome = self
+            .workspace
+            .board(&args.board)
+            .and_then(|board| board.apply(args.op));
         #[cfg(feature = "automation")]
-        applied.record();
-        Ok(outcome)
+        operation.record(&outcome);
+        outcome
     }
 
     fn answer_close(&self, answer: CloseAnswer) -> Result<(), Error> {

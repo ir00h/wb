@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tauri::webview::PageLoadEvent;
 use tauri::{App, Builder, Manager, State, WebviewWindow, WebviewWindowBuilder, Wry};
 use tiny_http::{Header, Method, Request, Response, Server};
-use wb_model::Op;
+use wb_model::{Error, Op, Outcome};
 
 const PORT_VARIABLE: &str = "WB_AUTOMATION_PORT";
 const BACKGROUND_VARIABLE: &str = "WB_AUTOMATION_BACKGROUND";
@@ -24,60 +24,73 @@ const ROUTES: &str = "POST /evaluate, POST /type, POST /key, POST /click, GET /s
 #[cfg(unix)]
 const RUNNER_POLL: Duration = Duration::from_millis(200);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Applied {
+enum Ending {
+    Applied,
+    Conflict,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationCount {
+    kind: &'static str,
+    note: Option<String>,
+    outcome: Ending,
+    count: u32,
+}
+
+static OPERATIONS: Mutex<Vec<OperationCount>> = Mutex::new(Vec::new());
+
+pub struct Operation {
     kind: &'static str,
     note: Option<String>,
 }
 
-#[derive(Serialize)]
-struct AppliedCount {
-    #[serde(flatten)]
-    applied: Applied,
-    count: u32,
-}
-
-static APPLIED: Mutex<Vec<(Applied, u32)>> = Mutex::new(Vec::new());
-
-impl Applied {
-    pub fn of(op: &Op) -> Applied {
+impl Operation {
+    pub fn of(op: &Op) -> Operation {
         match op {
-            Op::AddSection { .. } => Applied {
+            Op::AddSection { .. } => Operation {
                 kind: "addSection",
                 note: None,
             },
-            Op::AddNote { .. } => Applied {
+            Op::AddNote { .. } => Operation {
                 kind: "addNote",
                 note: None,
             },
-            Op::EditNote { note, .. } => Applied {
+            Op::EditNote { note, .. } => Operation {
                 kind: "editNote",
                 note: Some(note.to_string()),
             },
         }
     }
 
-    pub fn record(self) {
-        let mut counts = APPLIED.lock().unwrap_or_else(PoisonError::into_inner);
-        match counts.iter_mut().find(|(applied, _)| *applied == self) {
-            Some((_, count)) => *count += 1,
-            None => counts.push((self, 1)),
+    pub fn record(self, outcome: &Result<Outcome, Error>) {
+        let outcome = match outcome {
+            Ok(Outcome::Applied { .. } | Outcome::SectionAdded { .. }) => Ending::Applied,
+            Ok(Outcome::Conflict { .. }) => Ending::Conflict,
+            Err(_) => Ending::Failed,
+        };
+        let mut counts = OPERATIONS.lock().unwrap_or_else(PoisonError::into_inner);
+        let same = |counted: &&mut OperationCount| {
+            counted.kind == self.kind && counted.note == self.note && counted.outcome == outcome
+        };
+        match counts.iter_mut().find(same) {
+            Some(counted) => counted.count += 1,
+            None => counts.push(OperationCount {
+                kind: self.kind,
+                note: self.note,
+                outcome,
+                count: 1,
+            }),
         }
     }
 }
 
-fn applied_counts() -> Reply {
-    let counts: Vec<AppliedCount> = APPLIED
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .iter()
-        .map(|(applied, count)| AppliedCount {
-            applied: applied.clone(),
-            count: *count,
-        })
-        .collect();
-    match serde_json::to_string(&counts) {
+fn operation_counts() -> Reply {
+    let counts = OPERATIONS.lock().unwrap_or_else(PoisonError::into_inner);
+    match serde_json::to_string(&*counts) {
         Ok(json) => Reply::Json(json),
         Err(error) => Reply::Failed(error.to_string()),
     }
@@ -422,7 +435,7 @@ fn serve(server: &Server, window: &WebviewWindow, background: bool) {
                 },
                 Some(Route::Snapshot) => snapshot(window),
                 Some(Route::Window) => window_facts(window, background),
-                Some(Route::Applied) => applied_counts(),
+                Some(Route::Applied) => operation_counts(),
                 Some(Route::Close) => match window.close() {
                     Ok(()) => Reply::Json("null".to_owned()),
                     Err(error) => Reply::Failed(error.to_string()),

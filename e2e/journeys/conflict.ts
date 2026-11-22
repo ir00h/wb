@@ -36,8 +36,8 @@ async function clash(driver: Driver, choice: Choice, artifacts: string): Promise
   );
   assert.equal(await bodyOnDisk(garden.workspace, note), THEIRS, "the outside text is not on disk");
   assert.deepEqual(
-    (await app.applied()).filter((entry) => entry.note === note),
-    [{ kind: "editNote", note, count: 1 }],
+    await app.operations(),
+    [{ kind: "editNote", note, outcome: "conflict", count: 1 }],
     "closing the editor did not send one save, based on the text it started from, before the outside change arrived",
   );
   assert.equal(await editorText(app, note), ORIGINAL + TYPED, "a typed keystroke was lost");

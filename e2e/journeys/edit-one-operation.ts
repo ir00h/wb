@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { editorText, launchGarden, openEditor } from "../board-page.ts";
-import type { AppliedCount, Journey, RunningApp } from "../driver.ts";
+import type { Journey, OperationCount, RunningApp } from "../driver.ts";
 import { BOARD, changedFiles, TOMATO_BODY, treeHashes } from "../garden.ts";
 
 const POLL_MS = 50;
@@ -16,15 +16,11 @@ async function noteFile(board: string, note: string): Promise<string> {
   return name;
 }
 
-async function appliedTo(app: RunningApp, note: string): Promise<readonly AppliedCount[]> {
-  return (await app.applied()).filter((entry) => entry.note === note || entry.note === null);
-}
-
 async function waitForEdits(app: RunningApp, note: string, count: number): Promise<void> {
   const deadline = Date.now() + SAVE_WAIT_MS;
-  let last: readonly AppliedCount[] = [];
+  let last: readonly OperationCount[] = [];
   while (Date.now() < deadline) {
-    last = await app.applied();
+    last = await app.operations();
     if (
       last.some((entry) => entry.kind === "editNote" && entry.note === note && entry.count >= count)
     ) {
@@ -49,8 +45,8 @@ export const editOneOperation: Journey = {
     assert.equal(await editorText(app, tomato), `${TOMATO_BODY} Mulch in July.`);
     await waitForEdits(app, tomato, 1);
     assert.deepEqual(
-      await appliedTo(app, tomato),
-      [{ kind: "editNote", note: tomato, count: 1 }],
+      await app.operations(),
+      [{ kind: "editNote", note: tomato, outcome: "applied", count: 1 }],
       "a pause in typing did not save exactly one edit of the note",
     );
 
@@ -63,8 +59,8 @@ export const editOneOperation: Journey = {
     );
     await waitForEdits(app, tomato, 2);
     assert.deepEqual(
-      await appliedTo(app, tomato),
-      [{ kind: "editNote", note: tomato, count: 2 }],
+      await app.operations(),
+      [{ kind: "editNote", note: tomato, outcome: "applied", count: 2 }],
       "closing the editor did not save exactly one more edit of the note",
     );
 

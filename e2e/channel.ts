@@ -3,11 +3,11 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type {
-  AppliedCount,
   Driver,
   Files,
   Key,
   LaunchOptions,
+  OperationCount,
   PageFunction,
   Point,
   RunningApp,
@@ -266,9 +266,9 @@ class ChannelApp implements RunningApp {
     await this.#request("POST", "/click", JSON.stringify({ x: at.x, y: at.y, count }));
   }
 
-  async applied(): Promise<readonly AppliedCount[]> {
+  async operations(): Promise<readonly OperationCount[]> {
     const response = await this.#request("GET", "/applied");
-    return (await response.json()) as AppliedCount[];
+    return (await response.json()) as OperationCount[];
   }
 
   async snapshot(path: string): Promise<void> {

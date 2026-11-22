@@ -12,9 +12,10 @@ export type WayOut = "quit" | "close" | "terminate";
 
 export type Point = { readonly x: number; readonly y: number };
 
-export type AppliedCount = {
+export type OperationCount = {
   readonly kind: "addSection" | "addNote" | "editNote";
   readonly note: string | null;
+  readonly outcome: "applied" | "conflict" | "failed";
   readonly count: number;
 };
 
@@ -52,7 +53,7 @@ export interface RunningApp {
   typeText(text: string): Promise<void>;
   press(key: Key): Promise<void>;
   click(at: Point, count?: number): Promise<void>;
-  applied(): Promise<readonly AppliedCount[]>;
+  operations(): Promise<readonly OperationCount[]>;
   snapshot(path: string): Promise<void>;
   window(): Promise<WindowFacts>;
   askToQuit(way: WayOut): Promise<void>;
