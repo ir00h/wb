@@ -62,6 +62,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                     let _ = asking.emit(wb_model::CLOSE_REQUESTED_EVENT, ());
                 },
                 move || exiting.exit(0),
+                closing::WINDOW_ANSWER_LIMIT,
             );
             #[cfg(target_os = "macos")]
             macos::route_quit_requests(&closing)?;

@@ -1,11 +1,10 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use wb_model::CloseAnswer;
 
-const WINDOW_ANSWER_LIMIT: Duration = Duration::from_secs(10);
-const IN_FLIGHT_LIMIT: Duration = Duration::from_secs(5);
+pub const WINDOW_ANSWER_LIMIT: Duration = Duration::from_secs(10);
 const IN_FLIGHT_POLL: Duration = Duration::from_millis(20);
 const NOT_ASKED: u64 = 0;
 
@@ -19,6 +18,7 @@ type Signal = Box<dyn Fn() + Send + Sync>;
 pub struct Closing {
     ask: Signal,
     exit: Signal,
+    answer_limit: Duration,
     leaving: AtomicBool,
     asked: AtomicU64,
     asks: AtomicU64,
@@ -37,10 +37,12 @@ impl Closing {
     pub fn new(
         ask: impl Fn() + Send + Sync + 'static,
         exit: impl Fn() + Send + Sync + 'static,
+        answer_limit: Duration,
     ) -> Arc<Closing> {
         Arc::new(Closing {
             ask: Box::new(ask),
             exit: Box::new(exit),
+            answer_limit,
             leaving: AtomicBool::new(false),
             asked: AtomicU64::new(NOT_ASKED),
             asks: AtomicU64::new(NOT_ASKED),
@@ -78,7 +80,7 @@ impl Closing {
         {
             let closing = Arc::clone(self);
             std::thread::spawn(move || {
-                std::thread::sleep(WINDOW_ANSWER_LIMIT);
+                std::thread::sleep(closing.answer_limit);
                 if closing
                     .asked
                     .compare_exchange(ask, NOT_ASKED, Ordering::SeqCst, Ordering::SeqCst)
@@ -101,8 +103,7 @@ impl Closing {
 
     fn leave(&self) {
         self.leaving.store(true, Ordering::SeqCst);
-        let deadline = Instant::now() + IN_FLIGHT_LIMIT;
-        while self.in_flight.load(Ordering::SeqCst) > 0 && Instant::now() < deadline {
+        while self.in_flight.load(Ordering::SeqCst) > 0 {
             std::thread::sleep(IN_FLIGHT_POLL);
         }
         (self.exit)();
@@ -117,7 +118,9 @@ mod tests {
 
     use wb_model::CloseAnswer;
 
-    use super::{Closing, ExitRequest};
+    use super::{Closing, ExitRequest, WINDOW_ANSWER_LIMIT};
+
+    const ANSWER_LIMIT: Duration = Duration::from_millis(100);
 
     fn counted() -> (Arc<AtomicUsize>, impl Fn() + Send + Sync + 'static) {
         let count = Arc::new(AtomicUsize::new(0));
@@ -131,7 +134,7 @@ mod tests {
     fn a_request_to_quit_asks_the_window_and_waits_for_its_answer() {
         let (asked, ask) = counted();
         let (exited, exit) = counted();
-        let closing = Closing::new(ask, exit);
+        let closing = Closing::new(ask, exit, WINDOW_ANSWER_LIMIT);
         assert!(matches!(closing.exit_requested(), ExitRequest::Prevent));
         assert_eq!(asked.load(Ordering::SeqCst), 1);
         closing.answer(CloseAnswer::Stay);
@@ -146,18 +149,39 @@ mod tests {
     fn the_app_does_not_exit_while_an_operation_is_in_flight() {
         let (_, ask) = counted();
         let (exited, exit) = counted();
-        let closing = Closing::new(ask, exit);
+        let closing = Closing::new(ask, exit, ANSWER_LIMIT);
         let in_flight = closing.operation();
         let leaving = {
             let closing = Arc::clone(&closing);
             std::thread::spawn(move || closing.answer(CloseAnswer::Leave))
         };
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_secs(6));
         assert_eq!(exited.load(Ordering::SeqCst), 0);
         assert!(matches!(closing.exit_requested(), ExitRequest::Prevent));
         drop(in_flight);
         leaving.join().expect("left");
         assert!(exited.load(Ordering::SeqCst) >= 1);
         assert!(matches!(closing.exit_requested(), ExitRequest::Allow));
+    }
+
+    #[test]
+    fn the_app_stays_after_the_window_answered_stay() {
+        let (_, ask) = counted();
+        let (exited, exit) = counted();
+        let closing = Closing::new(ask, exit, ANSWER_LIMIT);
+        assert!(matches!(closing.exit_requested(), ExitRequest::Prevent));
+        closing.answer(CloseAnswer::Stay);
+        std::thread::sleep(ANSWER_LIMIT * 3);
+        assert_eq!(exited.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn the_app_leaves_when_the_window_gives_no_answer() {
+        let (_, ask) = counted();
+        let (exited, exit) = counted();
+        let closing = Closing::new(ask, exit, ANSWER_LIMIT);
+        assert!(matches!(closing.exit_requested(), ExitRequest::Prevent));
+        std::thread::sleep(ANSWER_LIMIT * 3);
+        assert_eq!(exited.load(Ordering::SeqCst), 1);
     }
 }
