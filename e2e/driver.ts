@@ -2,7 +2,18 @@ export type Files = Readonly<Record<string, string>>;
 
 export type LaunchOptions = {
   readonly workspace?: Files;
+  readonly prepare?: (workspace: string) => Promise<void>;
   readonly env?: Readonly<Record<string, string>>;
+};
+
+export type Key = "Escape" | "Enter" | "Tab" | "Backspace";
+
+export type Point = { readonly x: number; readonly y: number };
+
+export type AppliedCount = {
+  readonly kind: "addSection" | "addNote" | "editNote";
+  readonly note: string | null;
+  readonly count: number;
 };
 
 export type WaitOptions = {
@@ -34,6 +45,10 @@ export interface RunningApp {
     options: WaitOptions,
     ...args: Args
   ): Promise<Result>;
+  typeText(text: string): Promise<void>;
+  press(key: Key): Promise<void>;
+  click(at: Point, count?: number): Promise<void>;
+  applied(): Promise<readonly AppliedCount[]>;
   snapshot(path: string): Promise<void>;
   window(): Promise<WindowFacts>;
   quit(): Promise<void>;

@@ -3,10 +3,13 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
 import type {
+  AppliedCount,
   Driver,
   Files,
+  Key,
   LaunchOptions,
   PageFunction,
+  Point,
   RunningApp,
   WaitOptions,
   WindowFacts,
@@ -246,6 +249,23 @@ class ChannelApp implements RunningApp {
     );
   }
 
+  async typeText(text: string): Promise<void> {
+    await this.#request("POST", "/type", text);
+  }
+
+  async press(key: Key): Promise<void> {
+    await this.#request("POST", "/key", key);
+  }
+
+  async click(at: Point, count = 1): Promise<void> {
+    await this.#request("POST", "/click", JSON.stringify({ x: at.x, y: at.y, count }));
+  }
+
+  async applied(): Promise<readonly AppliedCount[]> {
+    const response = await this.#request("GET", "/applied");
+    return (await response.json()) as AppliedCount[];
+  }
+
   async snapshot(path: string): Promise<void> {
     const response = await this.#request("GET", "/snapshot");
     await mkdir(dirname(path), { recursive: true });
@@ -312,6 +332,7 @@ export class ChannelDriver implements Driver {
     await mkdir(workspace);
     await mkdir(data);
     await seed(workspace, options.workspace ?? {});
+    await options.prepare?.(workspace);
     const child = spawn(this.#shell, [], {
       env: {
         ...process.env,

@@ -47,6 +47,9 @@ With the feature on, setting `WB_AUTOMATION_PORT` makes the shell listen on `127
 | Route            | Does                                                                                                                                           |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | `POST /evaluate` | runs the request body as the body of an async function in the web view and returns its value as JSON; status 422 with the error when it throws |
+| `POST /type`     | types the request body into the web view as text input from the system                                                                         |
+| `POST /key`      | presses one key named in the request body: `Escape`, `Enter`, `Tab` or `Backspace`                                                             |
+| `POST /click`    | clicks at `{"x": .., "y": .., "count": ..}` in page points, `count` 2 for a double click                                                       |
 | `GET /snapshot`  | returns a PNG of the web view                                                                                                                  |
 | `GET /window`    | returns the title, size, scale, window number, whether the window is visible and whether background mode is on                                 |
 | `GET /applied`   | returns how many operations the shell has applied, by kind and note                                                                            |

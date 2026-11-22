@@ -20,7 +20,7 @@ const RUNNER_VARIABLE: &str = "WB_AUTOMATION_RUNNER";
 const LISTENING_ANNOUNCEMENT: &str = "AUTOMATION_LISTENING";
 const SETTLE_COMMAND: &str = "settle_evaluation";
 const EVALUATION_TIMEOUT: Duration = Duration::from_secs(10);
-const ROUTES: &str = "POST /evaluate, GET /snapshot, GET /window, GET /applied, POST /quit";
+const ROUTES: &str = "POST /evaluate, POST /type, POST /key, POST /click, GET /snapshot, GET /window, GET /applied, POST /quit";
 #[cfg(unix)]
 const RUNNER_POLL: Duration = Duration::from_millis(200);
 
@@ -370,6 +370,9 @@ impl Reply {
 
 enum Route {
     Evaluate,
+    Type,
+    Key,
+    Click,
     Snapshot,
     Window,
     Applied,
@@ -380,6 +383,9 @@ impl Route {
     fn of(method: &Method, url: &str) -> Option<Route> {
         match (method, url) {
             (Method::Post, "/evaluate") => Some(Route::Evaluate),
+            (Method::Post, "/type") => Some(Route::Type),
+            (Method::Post, "/key") => Some(Route::Key),
+            (Method::Post, "/click") => Some(Route::Click),
             (Method::Get, "/snapshot") => Some(Route::Snapshot),
             (Method::Get, "/window") => Some(Route::Window),
             (Method::Get, "/applied") => Some(Route::Applied),
@@ -396,6 +402,18 @@ fn serve(server: &Server, window: &WebviewWindow, background: bool) {
             match route {
                 Some(Route::Evaluate) => match read_body(&mut request) {
                     Ok(script) => evaluate(window, &script),
+                    Err(reply) => reply,
+                },
+                Some(Route::Type) => match read_body(&mut request) {
+                    Ok(text) => type_text(window, text),
+                    Err(reply) => reply,
+                },
+                Some(Route::Key) => match read_body(&mut request) {
+                    Ok(name) => press(window, &name),
+                    Err(reply) => reply,
+                },
+                Some(Route::Click) => match read_body(&mut request) {
+                    Ok(body) => click(window, &body),
                     Err(reply) => reply,
                 },
                 Some(Route::Snapshot) => snapshot(window),
@@ -511,6 +529,110 @@ fn snapshot(window: &WebviewWindow) -> Reply {
 #[cfg(not(target_os = "macos"))]
 fn snapshot(_window: &WebviewWindow) -> Reply {
     Reply::Failed("snapshots of the web view exist only on macOS".to_owned())
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Deserialize)]
+struct ClickRequest {
+    x: f64,
+    y: f64,
+    count: Option<isize>,
+}
+
+#[cfg(target_os = "macos")]
+const KEYS: [(&str, macos::Key); 4] = [
+    (
+        "Escape",
+        macos::Key {
+            code: 53,
+            characters: "\u{1b}",
+        },
+    ),
+    (
+        "Enter",
+        macos::Key {
+            code: 36,
+            characters: "\r",
+        },
+    ),
+    (
+        "Tab",
+        macos::Key {
+            code: 48,
+            characters: "\t",
+        },
+    ),
+    (
+        "Backspace",
+        macos::Key {
+            code: 51,
+            characters: "\u{7f}",
+        },
+    ),
+];
+
+#[cfg(target_os = "macos")]
+fn done(outcome: Result<Result<(), String>, String>) -> Reply {
+    match outcome.and_then(|done| done) {
+        Ok(()) => Reply::Json("null".to_owned()),
+        Err(error) => Reply::Failed(error),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn type_text(window: &WebviewWindow, text: String) -> Reply {
+    done(on_main_thread(window, move |webview, reply| {
+        let _ = reply.send(macos::type_text(webview, &text));
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn press(window: &WebviewWindow, name: &str) -> Reply {
+    let Some(index) = KEYS.iter().position(|(known, _)| *known == name.trim()) else {
+        let names: Vec<&str> = KEYS.iter().map(|(known, _)| *known).collect();
+        return Reply::Failed(format!(
+            "`{name}` is not a key the channel presses; the keys are {}",
+            names.join(", ")
+        ));
+    };
+    done(on_main_thread(window, move |webview, reply| {
+        let _ = reply.send(macos::press(webview, &KEYS[index].1));
+    }))
+}
+
+#[cfg(target_os = "macos")]
+fn click(window: &WebviewWindow, body: &str) -> Reply {
+    let request: ClickRequest = match serde_json::from_str(body) {
+        Ok(request) => request,
+        Err(error) => {
+            return Reply::Failed(format!(
+                "a click is {{\"x\": <number>, \"y\": <number>, \"count\": <number>}}: {error}"
+            ));
+        }
+    };
+    let at = macos::Click {
+        x: request.x,
+        y: request.y,
+        count: request.count.unwrap_or(1).max(1),
+    };
+    done(on_main_thread(window, move |webview, reply| {
+        let _ = reply.send(macos::click(webview, &at));
+    }))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn type_text(_window: &WebviewWindow, _text: String) -> Reply {
+    Reply::Failed("typing through the channel exists only on macOS".to_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn press(_window: &WebviewWindow, _name: &str) -> Reply {
+    Reply::Failed("pressing keys through the channel exists only on macOS".to_owned())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn click(_window: &WebviewWindow, _body: &str) -> Reply {
+    Reply::Failed("clicking through the channel exists only on macOS".to_owned())
 }
 
 #[cfg(target_os = "macos")]
