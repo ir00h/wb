@@ -46,17 +46,28 @@ export const look: Journey = {
     }
     const { app, garden } = await launchGarden(driver);
     const { tomato } = garden.notes;
-    const { beds } = garden.sections;
+    const { beds, raised } = garden.sections;
+    const card = `[data-card="${tomato}"]`;
     const selectors: Readonly<Record<string, string>> = {
       canvas: ".canvas",
-      dotGrid: ".dots",
+      canvasDots: ".dots",
+      body: "body",
       sectionFrame: `[data-section-body="${beds}"]`,
+      sectionHeader: `[data-section="${beds}"]`,
       sectionTitle: `[data-section="${beds}"] .section-title`,
-      card: `[data-card="${tomato}"]`,
-      tagChip: `[data-card="${tomato}"] .card-tags b.coloured`,
-      plainTagChip: `[data-card="${tomato}"] .card-tags b:not(.coloured)`,
-      cardTitle: `[data-card="${tomato}"] .card-title`,
-      cardBodyParagraph: `[data-card="${tomato}"] .card-body p`,
+      sectionNote: `[data-section="${beds}"] .section-note`,
+      nestedSectionFrame: `[data-section-body="${raised}"]`,
+      nestedSectionTitle: `[data-section="${raised}"] .section-title`,
+      card,
+      cardTagRow: `${card} .card-tags`,
+      tagChip: `${card} .card-tags b`,
+      tagChipColoured: `${card} .card-tags b.coloured`,
+      tagChipPlain: `${card} .card-tags b:not(.coloured)`,
+      cardTitle: `${card} .card-title`,
+      cardBody: `${card} .card-body`,
+      cardBodyParagraph: `${card} .card-body p`,
+      titleBarName: ".title-bar h1",
+      titleBarCount: ".title-bar .card-count",
     };
     const wanted = Object.entries(spec.elements).map(([element, styles]) => {
       const selector = selectors[element];
